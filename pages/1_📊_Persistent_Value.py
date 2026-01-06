@@ -207,6 +207,8 @@ def get_comprehensive_stock_data(ticker):
             'yoy_pct_change': yoy_pct_change,
             'pct_below_52wk_high': pct_below_52wk_high,
             'chan_range_pct': chan_range_pct,
+            'week_52_high': week_52_high if len(year_data) > 0 else 0,
+            'week_52_low': week_52_low if len(year_data) > 0 else 0,
             'sector': sector,
             'industry': industry
         }
@@ -279,6 +281,8 @@ if tickers and len(tickers) > 0:
                             'Port_Gain_Pct': port_gain_pct,
                             'Pct_Below_52wk': stock_data['pct_below_52wk_high'],
                             'Chan_Range': stock_data['chan_range_pct'],
+                            'Week_52_High': stock_data['week_52_high'],
+                            'Week_52_Low': stock_data['week_52_low'],
                             'Sector': stock_data['sector'],
                             'Industry': stock_data['industry']
                         })
@@ -315,37 +319,84 @@ if tickers and len(tickers) > 0:
             # PORTFOLIO PERFORMANCE DETAILS TABLE (TOP OF PAGE)
             st.subheader("💼 Portfolio Performance Details")
             
-            # Prepare display dataframe with proper formatting
+            # Prepare display dataframe (don't include Shares column or Sparkline)
             display_df = perf_df[[
-                'Security', 'Ticker', 'Cost Basis', 'Shares', 'Cur Price', 'Port_Pct',
+                'Security', 'Ticker', 'Cost Basis', 'Cur Price', 'Port_Pct',
                 'Daily_Change_Pct', 'YTD_Pct', 'YoY_Pct', 'Port_Gain_Pct',
                 'Pct_Below_52wk', 'Chan_Range', 'Sector', 'Industry'
             ]].copy()
             
-            # Format columns for display
-            display_df['Cost Basis'] = display_df['Cost Basis'].apply(lambda x: f"${x:.2f}")
-            display_df['Cur Price'] = display_df['Cur Price'].apply(lambda x: f"${x:.2f}")
-            display_df['Port_Pct'] = display_df['Port_Pct'].apply(lambda x: f"{x:.2f}%")
-            display_df['Daily_Change_Pct'] = display_df['Daily_Change_Pct'].apply(lambda x: f"{x:.2f}%")
-            display_df['YTD_Pct'] = display_df['YTD_Pct'].apply(lambda x: f"{x:.2f}%")
-            display_df['YoY_Pct'] = display_df['YoY_Pct'].apply(lambda x: f"{x:.2f}%")
-            display_df['Port_Gain_Pct'] = display_df['Port_Gain_Pct'].apply(lambda x: f"{x:.2f}%")
-            display_df['Pct_Below_52wk'] = display_df['Pct_Below_52wk'].apply(lambda x: f"-{x:.2f}%")
-            display_df['Chan_Range'] = display_df['Chan_Range'].apply(lambda x: f"{x:.2f}%")
-            
-            # Rename columns to match desired output
+            # Rename columns
             display_df.columns = [
-                'Security', 'Ticker', 'Cost Basis', 'Shares', 'Cur Price', '% Port.',
+                'Security', 'Ticker', 'Cost Basis', 'Cur Price', '% Port.',
                 'Daily % Change', 'YTD %', 'YoY % Change', 'Port. Gain %',
                 '% Below 52wk High', '52wk Chan Range', 'Sector', 'Industry'
             ]
             
-            # Display full table without scrolling - using a large height value
+            # Helper function for % Portfolio heatmap (white to light blue)
+            def color_port_pct(val):
+                if pd.isna(val):
+                    return ''
+                # Normalize to 0-1 range based on min/max
+                min_val = display_df['% Port.'].min()
+                max_val = display_df['% Port.'].max()
+                if max_val == min_val:
+                    normalized = 0.5
+                else:
+                    normalized = (val - min_val) / (max_val - min_val)
+                # Create blue gradient (light blue at max)
+                blue_intensity = int(255 - (normalized * 100))  # 255 (white) to 155 (light blue)
+                color = f'background-color: rgb({blue_intensity}, {blue_intensity}, 255)'
+                return color
+            
+            # Helper function for Daily % Change heatmap (red for negative, green for positive)
+            def color_daily_change(val):
+                if pd.isna(val):
+                    return ''
+                if val < 0:
+                    # Negative: shades of red (darker red for more negative)
+                    intensity = min(abs(val) * 20, 200)  # Cap at 200 for readability
+                    red = int(255 - intensity)
+                    color = f'background-color: rgb(255, {red}, {red})'
+                elif val > 0:
+                    # Positive: shades of green (brighter green for more positive)
+                    intensity = min(val * 20, 200)
+                    green = int(255 - intensity)
+                    color = f'background-color: rgb({green}, 255, {green})'
+                else:
+                    color = ''
+                return color
+            
+            # Apply styling
+            styled_df = display_df.style\
+                .format({
+                    'Cost Basis': '${:.2f}',
+                    'Cur Price': '${:.2f}',
+                    '% Port.': '{:.2f}%',
+                    'Daily % Change': '{:.2f}%',
+                    'YTD %': '{:.2f}%',
+                    'YoY % Change': '{:.2f}%',
+                    'Port. Gain %': '{:.2f}%',
+                    '% Below 52wk High': '{:.2f}%',
+                    '52wk Chan Range': '{:.1f}%'
+                })\
+                .applymap(color_port_pct, subset=['% Port.'])\
+                .applymap(color_daily_change, subset=['Daily % Change'])\
+                .set_properties(**{
+                    'text-align': 'left',
+                    'font-size': '12px'
+                })\
+                .set_table_styles([{
+                    'selector': 'thead th',
+                    'props': [('font-weight', 'bold'), ('color', '#000000'), ('background-color', '#f0f0f0')]
+                }])
+            
+            # Display styled dataframe (no column_config needed with Styler)
             st.dataframe(
-                display_df,
+                styled_df,
                 use_container_width=True,
                 hide_index=True,
-                height=800  # Large enough to show all 21 rows
+                height=800
             )
             
             # Portfolio totals
