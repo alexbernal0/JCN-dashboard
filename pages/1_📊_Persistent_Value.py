@@ -40,63 +40,25 @@ with col2:
 
 st.markdown("---")
 
-# Initialize session state for portfolio data
+# Initialize session state for portfolio data with default stocks
 if 'portfolio_data' not in st.session_state:
     st.session_state.portfolio_data = pd.DataFrame({
-        'Symbol': ['AAPL', 'MSFT', 'GOOGL'],
-        'Cost Basis': [150.00, 250.00, 2800.00],
-        'Shares': [100, 50, 10]
+        'Symbol': ['SPMO', 'ASML', 'MNST', 'MSCI', 'COST', 'AVGO', 'MA', 'FICO', 'SPGI', 'IDXX', 
+                   'ISRG', 'V', 'CAT', 'ORLY', 'HEI', 'CPRT', 'WM', 'TSLA', 'AAPL', 'LRCX', 'TSM'],
+        'Cost Basis': [97.40, 660.32, 50.01, 342.94, 655.21, 138.00, 418.76, 1850.00, 427.93, 378.01,
+                       322.50, 276.65, 287.70, 103.00, 172.00, 52.00, 177.77, 270.00, 181.40, 73.24, 99.61],
+        'Shares': [14301, 1042, 8234, 2016, 798, 6088, 1389, 778, 1554, 1570,
+                   2769, 2338, 1356, 3566, 1804, 21136, 3082, 5022, 2865, 18667, 5850]
     })
 
-# Portfolio Input Section
-st.subheader("📊 Portfolio Input")
-st.markdown("Enter your portfolio holdings below (max 30 positions)")
+# Initialize edit mode state
+if 'edit_mode' not in st.session_state:
+    st.session_state.edit_mode = False
 
-# Create editable data editor
-edited_df = st.data_editor(
-    st.session_state.portfolio_data,
-    num_rows="dynamic",
-    use_container_width=True,
-    column_config={
-        "Symbol": st.column_config.TextColumn(
-            "Stock Symbol",
-            help="Enter stock ticker symbol (e.g., AAPL, MSFT)",
-            max_chars=10,
-            required=True
-        ),
-        "Cost Basis": st.column_config.NumberColumn(
-            "Cost Basis ($)",
-            help="Average purchase price per share",
-            min_value=0.01,
-            format="$%.2f",
-            required=True
-        ),
-        "Shares": st.column_config.NumberColumn(
-            "Number of Shares",
-            help="Total shares owned",
-            min_value=0,
-            format="%d",
-            required=True
-        )
-    },
-    hide_index=False,
-    key="portfolio_editor"
-)
+# Extract valid tickers from current portfolio data
+tickers = [ticker.strip().upper() for ticker in st.session_state.portfolio_data['Symbol'].dropna().tolist() if ticker.strip()]
 
-# Limit to 30 rows
-if len(edited_df) > 30:
-    st.error("⚠️ Maximum 30 positions allowed. Please remove some rows.")
-    edited_df = edited_df.head(30)
-
-# Update session state
-st.session_state.portfolio_data = edited_df
-
-# Extract valid tickers
-tickers = [ticker.strip().upper() for ticker in edited_df['Symbol'].dropna().tolist() if ticker.strip()]
-
-st.markdown("---")
-
-# Dashboard Controls Section
+# Dashboard Controls Section (moved to top, below header)
 st.subheader("⚙️ Dashboard Controls")
 
 col1, col2 = st.columns([2, 3])
@@ -126,7 +88,7 @@ with col2:
     st.markdown("**Portfolio Summary**")
     if len(tickers) > 0:
         total_positions = len(tickers)
-        total_cost = (edited_df['Cost Basis'] * edited_df['Shares']).sum()
+        total_cost = (st.session_state.portfolio_data['Cost Basis'] * st.session_state.portfolio_data['Shares']).sum()
         st.metric("Total Positions", total_positions)
         st.metric("Total Cost Basis", f"${total_cost:,.2f}")
     else:
@@ -267,7 +229,7 @@ if tickers and len(tickers) > 0:
                     performance_data = []
                     for ticker in performance.keys():
                         # Get portfolio data for this ticker
-                        portfolio_row = edited_df[edited_df['Symbol'] == ticker]
+                        portfolio_row = st.session_state.portfolio_data[st.session_state.portfolio_data['Symbol'] == ticker]
                         
                         if not portfolio_row.empty:
                             cost_basis = portfolio_row['Cost Basis'].values[0]
@@ -319,9 +281,9 @@ if tickers and len(tickers) > 0:
                     st.subheader("💰 Portfolio Totals")
                     
                     total_current_value = sum([
-                        df[ticker].iloc[-1] * edited_df[edited_df['Symbol'] == ticker]['Shares'].values[0]
+                        df[ticker].iloc[-1] * st.session_state.portfolio_data[st.session_state.portfolio_data['Symbol'] == ticker]['Shares'].values[0]
                         for ticker in valid_tickers
-                        if ticker in edited_df['Symbol'].values
+                        if ticker in st.session_state.portfolio_data['Symbol'].values
                     ])
                     
                     total_gain_loss = total_current_value - total_cost
@@ -351,7 +313,91 @@ if tickers and len(tickers) > 0:
         st.error(f"An error occurred: {str(e)}")
         st.info("Please check your ticker symbols and try again.")
 else:
-    st.info("👆 Add stocks to your portfolio table above to begin analysis.")
+    st.info("👇 Add stocks to your portfolio table below to begin analysis.")
+
+# Portfolio Input Section (MOVED TO BOTTOM)
+st.markdown("---")
+st.markdown("---")
+st.subheader("📊 Portfolio Input")
+
+# Edit/Save button
+col1, col2 = st.columns([1, 5])
+with col1:
+    if st.session_state.edit_mode:
+        if st.button("💾 Save", use_container_width=True, type="primary"):
+            st.session_state.edit_mode = False
+            st.rerun()
+    else:
+        if st.button("✏️ Edit", use_container_width=True):
+            st.session_state.edit_mode = True
+            st.rerun()
+
+with col2:
+    if st.session_state.edit_mode:
+        st.info("✏️ **Edit Mode Active** - You can now modify the portfolio. Click 'Save' when done.")
+    else:
+        st.success("🔒 **View Mode** - Portfolio is locked. Click 'Edit' to make changes.")
+
+st.markdown("Enter your portfolio holdings below (max 30 positions)")
+
+# Display table based on edit mode
+if st.session_state.edit_mode:
+    # Editable mode
+    edited_df = st.data_editor(
+        st.session_state.portfolio_data,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Symbol": st.column_config.TextColumn(
+                "Stock Symbol",
+                help="Enter stock ticker symbol (e.g., AAPL, MSFT)",
+                max_chars=10,
+                required=True
+            ),
+            "Cost Basis": st.column_config.NumberColumn(
+                "Cost Basis ($)",
+                help="Average purchase price per share",
+                min_value=0.01,
+                format="$%.2f",
+                required=True
+            ),
+            "Shares": st.column_config.NumberColumn(
+                "Number of Shares",
+                help="Total shares owned",
+                min_value=0,
+                format="%d",
+                required=True
+            )
+        },
+        hide_index=False,
+        key="portfolio_editor"
+    )
+    
+    # Limit to 30 rows
+    if len(edited_df) > 30:
+        st.error("⚠️ Maximum 30 positions allowed. Please remove some rows.")
+        edited_df = edited_df.head(30)
+    
+    # Update session state with edited data
+    st.session_state.portfolio_data = edited_df
+else:
+    # Read-only mode
+    st.dataframe(
+        st.session_state.portfolio_data,
+        use_container_width=True,
+        hide_index=False,
+        column_config={
+            "Symbol": "Stock Symbol",
+            "Cost Basis": st.column_config.NumberColumn(
+                "Cost Basis ($)",
+                format="$%.2f"
+            ),
+            "Shares": st.column_config.NumberColumn(
+                "Number of Shares",
+                format="%d"
+            )
+        }
+    )
 
 # Footer
 st.markdown("---")
