@@ -8,6 +8,8 @@ from PIL import Image
 import time
 import json
 import os
+import finnhub
+import requests
 
 # Page configuration
 st.set_page_config(
@@ -39,8 +41,19 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Cache file path
+# Cache file paths
 CACHE_FILE = "portfolio_cache.json"
+NEWS_CACHE_FILE = "news_cache.json"
+
+# API Keys for news aggregation (using Streamlit secrets)
+# Configure these in Streamlit Cloud: Settings > Secrets
+try:
+    FINNHUB_API_KEY = st.secrets["FINNHUB_API_KEY"]
+    GROK_API_KEY = st.secrets["GROK_API_KEY"]
+except Exception as e:
+    st.error("⚠️ API keys not configured. Please add FINNHUB_API_KEY and GROK_API_KEY to Streamlit secrets.")
+    FINNHUB_API_KEY = None
+    GROK_API_KEY = None
 
 # Helper functions for caching
 def save_to_cache(data, timestamp):
@@ -215,6 +228,282 @@ def get_comprehensive_stock_data(ticker):
     except Exception as e:
         # Silent error handling - return None to indicate failure
         return None
+
+# ============================================================================
+# NEWS AGGREGATION FUNCTIONS
+# ============================================================================
+
+def filter_articles_batch(ticker, articles):
+    """Use Grok to filter multiple articles at once for efficiency."""
+    if not articles:
+        return []
+    
+    try:
+        url = "https://api.x.ai/v1/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {GROK_API_KEY}"
+        }
+        
+        articles_text = f"Ticker: {ticker}\n\n"
+        for i, article in enumerate(articles, 1):
+            articles_text += f"Article {i}:\n"
+            articles_text += f"Headline: {article['headline']}\n"
+            articles_text += f"Summary: {article['summary'][:200]}\n\n"
+        
+        payload = {
+            "model": "grok-4",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a financial news analyst filtering articles for relevance."
+                },
+                {
+                    "role": "user",
+                    "content": f"""{articles_text}
+
+For each article above, determine if it is PRIMARILY about {ticker} (not just mentioning it).
+
+Respond with ONLY a comma-separated list of article numbers that are primarily about {ticker}.
+Example: "1,3,5" or "2,4" or "NONE" if no articles are relevant.
+
+Numbers only, no explanations."""
+                }
+            ],
+            "stream": False,
+            "temperature": 0
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
+        
+        result = response.json()
+        answer = result['choices'][0]['message']['content'].strip().upper()
+        
+        if "NONE" in answer:
+            return []
+        
+        try:
+            relevant_indices = [int(x.strip()) - 1 for x in answer.replace("ARTICLE", "").replace(":", "").split(",") if x.strip().isdigit()]
+            return [articles[i] for i in relevant_indices if i < len(articles)]
+        except:
+            return articles
+            
+    except Exception as e:
+        return articles
+
+def fetch_finnhub_news_curated(symbols, days_back=1, target_per_stock=3):
+    """Fetch and filter company news from Finnhub."""
+    finnhub_client = finnhub.Client(api_key=FINNHUB_API_KEY)
+    all_news = []
+    
+    to_date = datetime.now()
+    from_date = to_date - timedelta(days=days_back)
+    
+    for symbol in symbols:
+        try:
+            news = finnhub_client.company_news(
+                symbol, 
+                _from=from_date.strftime('%Y-%m-%d'), 
+                to=to_date.strftime('%Y-%m-%d')
+            )
+            
+            recent_articles = []
+            for article in news:
+                article_time = datetime.fromtimestamp(article['datetime'])
+                if article_time >= (to_date - timedelta(hours=24)):
+                    recent_articles.append({
+                        'headline': article.get('headline', ''),
+                        'summary': article.get('summary', ''),
+                        'datetime': article_time,
+                        'url': article['url']
+                    })
+            
+            if recent_articles:
+                filtered_articles = []
+                for i in range(0, len(recent_articles), 10):
+                    batch = recent_articles[i:i+10]
+                    relevant = filter_articles_batch(symbol, batch)
+                    filtered_articles.extend(relevant)
+                    time.sleep(2)
+                
+                for article in filtered_articles[:target_per_stock]:
+                    summary = article['summary']
+                    
+                    if len(summary) > 150:
+                        first_period = summary.find('.', 50)
+                        if first_period > 0:
+                            second_period = summary.find('.', first_period + 1)
+                            if second_period > 0:
+                                summary = summary[:second_period + 1]
+                            else:
+                                summary = summary[:first_period + 1]
+                        else:
+                            summary = summary[:150] + '...'
+                    
+                    all_news.append({
+                        'Datetime': article['datetime'],
+                        'Stock Ticker': symbol,
+                        'Article Summary': summary,
+                        'Article Link': article['url']
+                    })
+            
+            time.sleep(1)
+            
+        except Exception as e:
+            continue
+    
+    return all_news
+
+def fetch_grok_news_curated(symbols, max_articles=30):
+    """Fetch curated news from Grok API."""
+    try:
+        url = "https://api.x.ai/v1/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {GROK_API_KEY}"
+        }
+        
+        stock_list = ", ".join(symbols)
+        today = datetime.now()
+        yesterday = today - timedelta(hours=24)
+        
+        payload = {
+            "model": "grok-4",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": f"""For these stocks: {stock_list}
+
+Find {max_articles} news articles from the LAST 24 HOURS where each article is PRIMARILY about ONE specific company (not just mentioning it).
+
+For EACH article, provide:
+TICKER: [the ONE stock this article is mainly about]
+SUMMARY: [1-2 sentence summary]
+---
+
+Only include articles that are genuinely focused on that company."""
+                }
+            ],
+            "search_parameters": {
+                "mode": "on",
+                "sources": [{"type": "news", "country": "US"}],
+                "from_date": yesterday.strftime('%Y-%m-%d'),
+                "to_date": today.strftime('%Y-%m-%d'),
+                "return_citations": True,
+                "max_search_results": max_articles
+            },
+            "stream": False,
+            "temperature": 0
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
+        
+        result = response.json()
+        content = result['choices'][0]['message']['content']
+        citations = result['choices'][0]['message'].get('citations', [])
+        
+        all_news = []
+        sections = content.split('---')
+        
+        for i, citation in enumerate(citations[:max_articles]):
+            section = sections[i] if i < len(sections) else ""
+            
+            found_symbol = None
+            if 'TICKER:' in section:
+                ticker_line = section.split('TICKER:')[1].split('\n')[0].strip()
+                for symbol in symbols:
+                    if symbol in ticker_line:
+                        found_symbol = symbol
+                        break
+            
+            if not found_symbol:
+                for symbol in symbols:
+                    if symbol in section:
+                        found_symbol = symbol
+                        break
+            
+            if not found_symbol:
+                continue
+            
+            summary_text = section.strip()
+            if 'SUMMARY:' in summary_text:
+                summary_text = summary_text.split('SUMMARY:')[1].strip()
+            
+            if len(summary_text) > 200:
+                first_period = summary_text.find('.', 50)
+                if first_period > 0:
+                    second_period = summary_text.find('.', first_period + 1)
+                    if second_period > 0:
+                        summary_text = summary_text[:second_period + 1]
+                    else:
+                        summary_text = summary_text[:first_period + 1]
+                else:
+                    summary_text = summary_text[:200] + '...'
+            
+            if not summary_text:
+                summary_text = "Recent market news"
+            
+            all_news.append({
+                'Datetime': datetime.now(),
+                'Stock Ticker': found_symbol,
+                'Article Summary': summary_text,
+                'Article Link': citation
+            })
+        
+        return all_news
+        
+    except Exception as e:
+        return []
+
+def aggregate_curated_news(symbols, target_total=63):
+    """Aggregate curated news targeting up to 63 articles (3 per stock)."""
+    target_per_stock = 3
+    
+    finnhub_news = fetch_finnhub_news_curated(symbols, days_back=1, target_per_stock=target_per_stock)
+    grok_news = fetch_grok_news_curated(symbols, max_articles=30)
+    
+    all_news = finnhub_news + grok_news
+    
+    if not all_news:
+        return pd.DataFrame(columns=['Datetime', 'Stock Ticker', 'Article Summary', 'Article Link'])
+    
+    news_df = pd.DataFrame(all_news)
+    news_df = news_df.drop_duplicates(subset=['Article Link'], keep='first')
+    news_df = news_df.sort_values('Datetime', ascending=False)
+    news_df = news_df.head(target_total)
+    news_df = news_df.reset_index(drop=True)
+    
+    return news_df
+
+def save_news_to_cache(news_df, timestamp):
+    """Save news data to cache file"""
+    try:
+        cache_data = {
+            'timestamp': timestamp.isoformat(),
+            'news': news_df.to_dict('records')
+        }
+        with open(NEWS_CACHE_FILE, 'w') as f:
+            json.dump(cache_data, f)
+    except Exception as e:
+        pass
+
+def load_news_from_cache():
+    """Load news data from cache file"""
+    try:
+        if os.path.exists(NEWS_CACHE_FILE):
+            with open(NEWS_CACHE_FILE, 'r') as f:
+                cache_data = json.load(f)
+            
+            news_df = pd.DataFrame(cache_data['news'])
+            news_df['Datetime'] = pd.to_datetime(news_df['Datetime'])
+            timestamp = datetime.fromisoformat(cache_data['timestamp'])
+            
+            return news_df, timestamp
+    except Exception as e:
+        pass
+    return None, None
 
 # Check if we should fetch fresh data
 should_fetch_fresh = False
@@ -564,6 +853,96 @@ if tickers and len(tickers) > 0:
         st.error(f"An error occurred: {str(e)}")
 else:
     st.info("👇 Add stocks to your portfolio table below to begin analysis.")
+
+# ============================================================================
+# GROK NEWS AGGREGATOR SECTION
+# ============================================================================
+st.markdown("---")
+st.markdown("---")
+
+# Initialize session state for news refresh
+if 'force_news_refresh' not in st.session_state:
+    st.session_state.force_news_refresh = False
+if 'last_news_refresh' not in st.session_state:
+    st.session_state.last_news_refresh = None
+
+# Header with reload button
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.subheader("📰 Grok News Aggregator")
+with col2:
+    if st.button("🔄 Reload News", use_container_width=True):
+        st.session_state.force_news_refresh = True
+        st.rerun()
+
+# Check if we should fetch fresh news
+should_fetch_fresh_news = False
+
+# Check for force refresh (user clicked button)
+if st.session_state.force_news_refresh:
+    should_fetch_fresh_news = True
+    st.session_state.force_news_refresh = False
+
+# Check for midnight refresh (daily at midnight EST)
+if st.session_state.last_news_refresh:
+    now = datetime.now()
+    last_refresh = st.session_state.last_news_refresh
+    # Check if it's past midnight and we haven't refreshed today
+    if now.date() > last_refresh.date():
+        should_fetch_fresh_news = True
+
+# Try to load from cache first
+if not should_fetch_fresh_news:
+    news_df, news_timestamp = load_news_from_cache()
+    if news_df is not None and len(news_df) > 0:
+        st.info(f"📦 Loaded from cache (Last updated: {news_timestamp.strftime('%Y-%m-%d %I:%M:%S %p')} EST) - Click 'Reload News' for latest articles")
+    else:
+        should_fetch_fresh_news = True
+else:
+    news_df = None
+
+# Fetch fresh news if needed
+if should_fetch_fresh_news:
+    # Check if portfolio data exists
+    if 'portfolio_df' in st.session_state and len(st.session_state.portfolio_df) > 0:
+        with st.spinner("🔍 Fetching curated news from Finnhub and Grok... This may take a few minutes."):
+            # Get portfolio symbols
+            portfolio_symbols = st.session_state.portfolio_df['Symbol'].tolist()
+            
+            # Aggregate news
+            news_df = aggregate_curated_news(portfolio_symbols, target_total=63)
+            
+            if len(news_df) > 0:
+                # Save to cache
+                now = datetime.now()
+                save_news_to_cache(news_df, now)
+                st.session_state.last_news_refresh = now
+                st.success(f"✅ Fresh news loaded successfully! Found {len(news_df)} articles.")
+            else:
+                st.warning("⚠️ No recent news articles found for your portfolio stocks.")
+    else:
+        st.info("👇 Add stocks to your portfolio to see curated news.")
+        news_df = None
+
+# Display news table
+if news_df is not None and len(news_df) > 0:
+    st.markdown(f"**Showing {len(news_df)} articles from the last 24 hours**")
+    st.markdown(f"*Source: Finnhub + Grok AI (filtered for relevance)*")
+    
+    # Format datetime for display
+    display_news_df = news_df.copy()
+    display_news_df['Datetime'] = display_news_df['Datetime'].dt.strftime('%Y-%m-%d %I:%M %p')
+    
+    # Make links clickable
+    display_news_df['Article Link'] = display_news_df['Article Link'].apply(lambda x: f'<a href="{x}" target="_blank">Read Article</a>')
+    
+    # Display as HTML table for clickable links
+    st.markdown(
+        display_news_df.to_html(escape=False, index=False),
+        unsafe_allow_html=True
+    )
+else:
+    st.info("No news articles available. Click 'Reload News' to fetch the latest articles.")
 
 # Portfolio Input Section (AT BOTTOM)
 st.markdown("---")
