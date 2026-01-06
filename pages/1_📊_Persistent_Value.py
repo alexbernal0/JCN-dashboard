@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import yfinance as yf
 from datetime import datetime, timedelta
 from PIL import Image
+import time
 
 # Page configuration
 st.set_page_config(
@@ -26,7 +27,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # Header with logo and title
-col1, col2 = st.columns([1, 4])
+col1, col2, col3 = st.columns([1, 4, 2])
 with col1:
     try:
         logo = Image.open("jcn_logo.jpg")
@@ -38,7 +39,29 @@ with col2:
     st.title("📊 Persistent Value Portfolio")
     st.markdown("Value-focused investment strategy with long-term growth potential")
 
+with col3:
+    st.write("")  # Spacer
+    # Refresh button
+    if st.button("🔄 Refresh Data", use_container_width=True, type="primary"):
+        st.session_state.last_refresh = datetime.now()
+        st.rerun()
+    
+    # Display last refresh time and source
+    if 'last_refresh' not in st.session_state:
+        st.session_state.last_refresh = datetime.now()
+    
+    refresh_time = st.session_state.last_refresh.strftime("%I:%M:%S %p")
+    st.caption(f"**Last Updated:** {refresh_time}")
+    st.caption("**Source:** Yahoo Finance")
+
 st.markdown("---")
+
+# Auto-refresh every 15 minutes
+if 'last_refresh' in st.session_state:
+    time_since_refresh = (datetime.now() - st.session_state.last_refresh).total_seconds()
+    if time_since_refresh > 900:  # 900 seconds = 15 minutes
+        st.session_state.last_refresh = datetime.now()
+        st.rerun()
 
 # Initialize session state for portfolio data with default stocks
 if 'portfolio_data' not in st.session_state:
@@ -55,52 +78,30 @@ if 'portfolio_data' not in st.session_state:
 if 'edit_mode' not in st.session_state:
     st.session_state.edit_mode = False
 
+# Initialize time period state
+if 'selected_period' not in st.session_state:
+    st.session_state.selected_period = "6 Months"
+
 # Extract valid tickers from current portfolio data
 tickers = [ticker.strip().upper() for ticker in st.session_state.portfolio_data['Symbol'].dropna().tolist() if ticker.strip()]
-
-# Dashboard Controls Section (moved to top, below header)
-st.subheader("⚙️ Dashboard Controls")
-
-col1, col2 = st.columns([2, 3])
-
-with col1:
-    st.markdown("**Time Horizon**")
-    time_options = {
-        "1 Month": "1mo",
-        "3 Months": "3mo",
-        "6 Months": "6mo",
-        "1 Year": "1y",
-        "5 Years": "5y",
-        "10 Years": "10y",
-        "20 Years": "20y"
-    }
-    
-    selected_period = st.radio(
-        "Select time period",
-        options=list(time_options.keys()),
-        index=2,  # Default to 6 Months
-        label_visibility="collapsed"
-    )
-    
-    period = time_options[selected_period]
-
-with col2:
-    st.markdown("**Portfolio Summary**")
-    if len(tickers) > 0:
-        total_positions = len(tickers)
-        total_cost = (st.session_state.portfolio_data['Cost Basis'] * st.session_state.portfolio_data['Shares']).sum()
-        st.metric("Total Positions", total_positions)
-        st.metric("Total Cost Basis", f"${total_cost:,.2f}")
-    else:
-        st.info("Add stocks to your portfolio to see summary")
-
-st.markdown("---")
 
 # Main content area - Stock Analysis
 if tickers and len(tickers) > 0:
     try:
         with st.spinner("Fetching stock data..."):
             # Fetch data for all tickers
+            time_options = {
+                "1 Month": "1mo",
+                "3 Months": "3mo",
+                "6 Months": "6mo",
+                "1 Year": "1y",
+                "5 Years": "5y",
+                "10 Years": "10y",
+                "20 Years": "20y"
+            }
+            
+            period = time_options[st.session_state.selected_period]
+            
             stock_data = {}
             valid_tickers = []
             
@@ -133,6 +134,81 @@ if tickers and len(tickers) > 0:
                         end_price = df_normalized[ticker].iloc[-1]
                         pct_change = ((end_price - start_price) / start_price) * 100
                         performance[ticker] = pct_change
+                    
+                    # MOVED TO TOP: Portfolio Performance Details Table
+                    st.subheader("💼 Portfolio Performance Details")
+                    
+                    performance_data = []
+                    total_cost = 0
+                    total_current_value = 0
+                    
+                    for ticker in performance.keys():
+                        # Get portfolio data for this ticker
+                        portfolio_row = st.session_state.portfolio_data[st.session_state.portfolio_data['Symbol'] == ticker]
+                        
+                        if not portfolio_row.empty:
+                            cost_basis = portfolio_row['Cost Basis'].values[0]
+                            shares = portfolio_row['Shares'].values[0]
+                            current_price = df[ticker].iloc[-1]
+                            
+                            total_cost_position = cost_basis * shares
+                            current_value = current_price * shares
+                            gain_loss = current_value - total_cost_position
+                            gain_loss_pct = (gain_loss / total_cost_position) * 100 if total_cost_position > 0 else 0
+                            
+                            total_cost += total_cost_position
+                            total_current_value += current_value
+                            
+                            performance_data.append({
+                                'Ticker': ticker,
+                                'Shares': int(shares),
+                                'Cost Basis': f"${cost_basis:.2f}",
+                                'Current Price': f"${current_price:.2f}",
+                                'Total Cost': f"${total_cost_position:,.2f}",
+                                'Current Value': f"${current_value:,.2f}",
+                                'Gain/Loss': f"${gain_loss:,.2f}",
+                                'Gain/Loss %': f"{gain_loss_pct:.2f}%",
+                                'Period Performance': f"{performance[ticker]:.2f}%",
+                                '_sort_value': gain_loss_pct
+                            })
+                    
+                    performance_df = pd.DataFrame(performance_data)
+                    
+                    # Sort by gain/loss percentage
+                    performance_df = performance_df.sort_values('_sort_value', ascending=False)
+                    performance_df = performance_df.drop('_sort_value', axis=1)
+                    performance_df = performance_df.reset_index(drop=True)
+                    
+                    # Display full table without scrolling
+                    st.dataframe(
+                        performance_df, 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+                    
+                    # Portfolio totals
+                    st.markdown("---")
+                    st.subheader("💰 Portfolio Totals")
+                    
+                    total_gain_loss = total_current_value - total_cost
+                    total_gain_loss_pct = (total_gain_loss / total_cost) * 100 if total_cost > 0 else 0
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Total Cost Basis", f"${total_cost:,.2f}")
+                    
+                    with col2:
+                        st.metric("Current Value", f"${total_current_value:,.2f}")
+                    
+                    with col3:
+                        st.metric("Total Gain/Loss", f"${total_gain_loss:,.2f}", 
+                                 delta=f"{total_gain_loss_pct:.2f}%")
+                    
+                    with col4:
+                        st.metric("Return on Investment", f"{total_gain_loss_pct:.2f}%")
+                    
+                    st.markdown("---")
                     
                     # Find best and worst performers
                     best_stock = max(performance, key=performance.get)
@@ -168,7 +244,7 @@ if tickers and len(tickers) > 0:
                     st.markdown("---")
                     
                     # Create interactive chart
-                    st.subheader(f"📊 Normalized Stock Price Comparison - {selected_period}")
+                    st.subheader(f"📊 Normalized Stock Price Comparison - {st.session_state.selected_period}")
                     
                     fig = go.Figure()
                     
@@ -221,88 +297,22 @@ if tickers and len(tickers) > 0:
                     
                     st.plotly_chart(fig, use_container_width=True)
                     
+                    # Dashboard Controls Section (MOVED BELOW CHART, HORIZONTAL LAYOUT)
                     st.markdown("---")
+                    st.subheader("⚙️ Dashboard Controls")
                     
-                    # Performance table with portfolio data
-                    st.subheader("💼 Portfolio Performance Details")
+                    st.markdown("**Time Horizon**")
                     
-                    performance_data = []
-                    for ticker in performance.keys():
-                        # Get portfolio data for this ticker
-                        portfolio_row = st.session_state.portfolio_data[st.session_state.portfolio_data['Symbol'] == ticker]
-                        
-                        if not portfolio_row.empty:
-                            cost_basis = portfolio_row['Cost Basis'].values[0]
-                            shares = portfolio_row['Shares'].values[0]
-                            current_price = df[ticker].iloc[-1]
-                            
-                            total_cost = cost_basis * shares
-                            current_value = current_price * shares
-                            gain_loss = current_value - total_cost
-                            gain_loss_pct = (gain_loss / total_cost) * 100 if total_cost > 0 else 0
-                            
-                            performance_data.append({
-                                'Ticker': ticker,
-                                'Shares': int(shares),
-                                'Cost Basis': f"${cost_basis:.2f}",
-                                'Current Price': f"${current_price:.2f}",
-                                'Total Cost': f"${total_cost:,.2f}",
-                                'Current Value': f"${current_value:,.2f}",
-                                'Gain/Loss': f"${gain_loss:,.2f}",
-                                'Gain/Loss %': f"{gain_loss_pct:.2f}%",
-                                'Period Performance': f"{performance[ticker]:.2f}%",
-                                '_sort_value': gain_loss_pct
-                            })
-                        else:
-                            performance_data.append({
-                                'Ticker': ticker,
-                                'Shares': 0,
-                                'Cost Basis': 'N/A',
-                                'Current Price': f"${df[ticker].iloc[-1]:.2f}",
-                                'Total Cost': 'N/A',
-                                'Current Value': 'N/A',
-                                'Gain/Loss': 'N/A',
-                                'Gain/Loss %': 'N/A',
-                                'Period Performance': f"{performance[ticker]:.2f}%",
-                                '_sort_value': 0
-                            })
+                    # Horizontal time period selection
+                    time_period_options = list(time_options.keys())
                     
-                    performance_df = pd.DataFrame(performance_data)
-                    
-                    # Sort by gain/loss percentage
-                    performance_df = performance_df.sort_values('_sort_value', ascending=False)
-                    performance_df = performance_df.drop('_sort_value', axis=1)
-                    performance_df = performance_df.reset_index(drop=True)
-                    
-                    st.dataframe(performance_df, use_container_width=True, hide_index=True)
-                    
-                    # Portfolio totals
-                    st.markdown("---")
-                    st.subheader("💰 Portfolio Totals")
-                    
-                    total_current_value = sum([
-                        df[ticker].iloc[-1] * st.session_state.portfolio_data[st.session_state.portfolio_data['Symbol'] == ticker]['Shares'].values[0]
-                        for ticker in valid_tickers
-                        if ticker in st.session_state.portfolio_data['Symbol'].values
-                    ])
-                    
-                    total_gain_loss = total_current_value - total_cost
-                    total_gain_loss_pct = (total_gain_loss / total_cost) * 100 if total_cost > 0 else 0
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("Total Cost Basis", f"${total_cost:,.2f}")
-                    
-                    with col2:
-                        st.metric("Current Value", f"${total_current_value:,.2f}")
-                    
-                    with col3:
-                        st.metric("Total Gain/Loss", f"${total_gain_loss:,.2f}", 
-                                 delta=f"{total_gain_loss_pct:.2f}%")
-                    
-                    with col4:
-                        st.metric("Return on Investment", f"{total_gain_loss_pct:.2f}%")
+                    cols = st.columns(7)
+                    for idx, option in enumerate(time_period_options):
+                        with cols[idx]:
+                            if st.button(option, use_container_width=True, 
+                                       type="primary" if st.session_state.selected_period == option else "secondary"):
+                                st.session_state.selected_period = option
+                                st.rerun()
                     
                 else:
                     st.error("Not enough data available for the selected time period.")
@@ -315,7 +325,7 @@ if tickers and len(tickers) > 0:
 else:
     st.info("👇 Add stocks to your portfolio table below to begin analysis.")
 
-# Portfolio Input Section (MOVED TO BOTTOM)
+# Portfolio Input Section (AT BOTTOM)
 st.markdown("---")
 st.markdown("---")
 st.subheader("📊 Portfolio Input")
@@ -381,7 +391,7 @@ if st.session_state.edit_mode:
     # Update session state with edited data
     st.session_state.portfolio_data = edited_df
 else:
-    # Read-only mode
+    # Read-only mode - show all rows
     st.dataframe(
         st.session_state.portfolio_data,
         use_container_width=True,
