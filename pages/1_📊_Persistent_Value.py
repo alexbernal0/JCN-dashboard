@@ -231,6 +231,110 @@ def get_comprehensive_stock_data(ticker):
         return None
 
 # ============================================================================
+# BENCHMARK CALCULATION FUNCTIONS
+# ============================================================================
+
+# SPY cache file
+SPY_CACHE_FILE = "spy_cache.json"
+
+def save_spy_to_cache(spy_data, timestamp):
+    """Save SPY data to cache file"""
+    try:
+        cache_data = {
+            'spy_daily_change': spy_data,
+            'timestamp': timestamp.isoformat()
+        }
+        with open(SPY_CACHE_FILE, 'w') as f:
+            json.dump(cache_data, f)
+    except Exception as e:
+        pass
+
+def load_spy_from_cache():
+    """Load SPY data from cache file"""
+    try:
+        if os.path.exists(SPY_CACHE_FILE):
+            with open(SPY_CACHE_FILE, 'r') as f:
+                cache_data = json.load(f)
+            return cache_data['spy_daily_change'], datetime.fromisoformat(cache_data['timestamp'])
+        return None, None
+    except Exception as e:
+        return None, None
+
+def get_spy_daily_change(should_fetch_fresh, cached_time):
+    """
+    Get SPY's daily percentage change with caching.
+    
+    Parameters:
+    -----------
+    should_fetch_fresh : bool
+        Whether to fetch fresh data or use cache
+    cached_time : datetime
+        Timestamp of cached data
+    
+    Returns:
+    --------
+    float
+        SPY daily percentage change
+    """
+    # Try to load from cache first
+    cached_spy, spy_cache_time = load_spy_from_cache()
+    
+    # If we should fetch fresh or cache doesn't exist
+    if should_fetch_fresh or cached_spy is None:
+        try:
+            spy = yf.Ticker('SPY')
+            data = spy.history(period="5d", interval="1d")
+            
+            if data is not None and len(data) >= 2:
+                current_price = data['Close'].iloc[-1]
+                previous_price = data['Close'].iloc[-2]
+                daily_change = ((current_price - previous_price) / previous_price) * 100
+                
+                # Save to cache
+                save_spy_to_cache(daily_change, datetime.now())
+                return daily_change
+            return cached_spy if cached_spy is not None else 0.0
+        except Exception as e:
+            return cached_spy if cached_spy is not None else 0.0
+    else:
+        # Return cached value
+        return cached_spy if cached_spy is not None else 0.0
+
+def calculate_portfolio_daily_change(portfolio_df):
+    """
+    Calculate portfolio's weighted daily percentage change.
+    
+    Parameters:
+    -----------
+    portfolio_df : pd.DataFrame
+        Portfolio DataFrame with '% Port.' and 'Daily % Change' columns
+    
+    Returns:
+    --------
+    float
+        Portfolio weighted daily percentage change
+    """
+    try:
+        # Get the relevant columns
+        port_pct_col = '% Port.'
+        daily_change_col = 'Daily % Change'
+        
+        if port_pct_col not in portfolio_df.columns or daily_change_col not in portfolio_df.columns:
+            return 0.0
+        
+        # Calculate weighted average
+        # Weight = portfolio percentage / 100
+        # Weighted change = sum(weight * daily_change)
+        weights = portfolio_df[port_pct_col] / 100
+        daily_changes = portfolio_df[daily_change_col]
+        
+        weighted_daily_change = (weights * daily_changes).sum()
+        
+        return weighted_daily_change
+    except Exception as e:
+        return 0.0
+
+# ============================================================================
 # NEWS AGGREGATION FUNCTIONS
 # ============================================================================
 
@@ -807,29 +911,39 @@ if tickers and len(tickers) > 0:
                 height=800
             )
             
-            # Portfolio totals
+            # Benchmarks section
             st.markdown("---")
-            st.subheader("💰 Portfolio Totals")
+            st.subheader("📊 Benchmarks")
             
-            total_cost = (perf_df['Cost Basis'] * perf_df['Shares']).sum()
-            total_current_value = perf_df['Position_Value'].sum()
-            total_gain_loss = total_current_value - total_cost
-            total_gain_loss_pct = (total_gain_loss / total_cost) * 100 if total_cost > 0 else 0
+            # Calculate portfolio weighted daily change
+            portfolio_daily_change = calculate_portfolio_daily_change(display_df)
             
-            col1, col2, col3, col4 = st.columns(4)
+            # Get SPY daily change (from cache or fresh)
+            spy_daily_change = get_spy_daily_change(should_fetch_fresh, cached_time)
+            
+            # Calculate daily alpha
+            daily_alpha = portfolio_daily_change - spy_daily_change
+            
+            # Display 3 metrics horizontally
+            col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.metric("Total Cost Basis", f"${total_cost:,.2f}")
+                st.metric(
+                    "Portfolio Est. Daily % Change",
+                    f"{portfolio_daily_change:+.2f}%"
+                )
             
             with col2:
-                st.metric("Current Value", f"${total_current_value:,.2f}")
+                st.metric(
+                    "Benchmark Est. Daily % Change",
+                    f"{spy_daily_change:+.2f}%"
+                )
             
             with col3:
-                st.metric("Total Gain/Loss", f"${total_gain_loss:,.2f}", 
-                         delta=f"{total_gain_loss_pct:.2f}%")
-            
-            with col4:
-                st.metric("Return on Investment", f"{total_gain_loss_pct:.2f}%")
+                st.metric(
+                    "Est. Daily Alpha",
+                    f"{daily_alpha:+.2f}%"
+                )
             
             st.markdown("---")
             
