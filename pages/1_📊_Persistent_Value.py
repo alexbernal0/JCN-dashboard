@@ -612,6 +612,7 @@ def create_portfolio_pie_charts(portfolio_df):
 def get_fundamentals_from_motherduck(tickers, portfolio_df):
     """
     Fetch fundamental metrics from MotherDuck database for portfolio stocks.
+    Uses SELECT * and accesses columns directly in pandas to avoid SQL escaping issues.
     
     Parameters:
     -----------
@@ -623,7 +624,7 @@ def get_fundamentals_from_motherduck(tickers, portfolio_df):
     Returns:
     --------
     pd.DataFrame
-        Fundamentals scorecard with all metrics
+        Fundamentals scorecard with all metrics (NaN filled with appropriate defaults)
     """
     try:
         # Get MotherDuck token from environment
@@ -642,81 +643,114 @@ def get_fundamentals_from_motherduck(tickers, portfolio_df):
         # Connect to MotherDuck
         conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
         
-        # Get GuruFocus data
-        try:
-            gf_data = conn.execute(f"""
-                SELECT * FROM my_db.main.gurufocus_with_momentum
-                WHERE symbol IN ('{symbols_str}')
-            """).df()
-        except Exception as e:
-            st.warning(f"Could not fetch GuruFocus data: {str(e)}")
-            gf_data = pd.DataFrame()
+        # Get all data with SELECT * and join with latest OBQ scores
+        query = f"""
+        WITH latest_obq AS (
+            SELECT *
+            FROM my_db.main.OBQ_Scores
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY calculation_date DESC) = 1
+        )
+        SELECT 
+            gf.*,
+            obq.obq_composite_score,
+            obq.obq_growth_score,
+            obq.OBQ_Quality_Rank,
+            obq.obq_momentum_score,
+            obq.obq_finstr_score,
+            obq.obq_value_score,
+            obq.obq_gqv,
+            obq.obq_gqm,
+            obq.obq_vqf,
+            obq.obq_gm
+        FROM my_db.main.gurufocus_with_momentum gf
+        LEFT JOIN latest_obq obq ON gf.Symbol = obq.symbol
+        WHERE gf.Symbol IN ('{symbols_str}')
+        ORDER BY gf.Symbol
+        """
         
-        # Get OBQ Scores data (most recent only)
-        try:
-            obq_data = conn.execute(f"""
-                SELECT * FROM my_db.main.OBQ_Scores
-                WHERE symbol IN ('{symbols_str}')
-                QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY calculation_date DESC) = 1
-            """).df()
-        except Exception as e:
-            st.warning(f"Could not fetch OBQ Scores data: {str(e)}")
-            obq_data = pd.DataFrame()
-        
+        # Execute query
+        result = conn.execute(query).df()
         conn.close()
         
-        # If no data found, return None
-        if gf_data.empty and obq_data.empty:
+        if result.empty:
+            st.warning("No data found in MotherDuck for portfolio stocks.")
             return None
         
-        # Merge datasets
-        if not gf_data.empty and not obq_data.empty:
-            merged = pd.merge(gf_data, obq_data, left_on='Symbol', right_on='symbol', how='left')
-        elif not gf_data.empty:
-            merged = gf_data
-        else:
-            merged = obq_data.rename(columns={'symbol': 'Symbol'})
-        
-        # Build scorecard with all columns (fill missing with N/A)
+        # Build final scorecard with proper formatting
         scorecard = pd.DataFrame()
-        scorecard['Ticker'] = merged['Symbol']
+        scorecard['Ticker'] = result['Symbol']
         
-        # Add company names from portfolio
+        # Use company name from portfolio if available, otherwise from database
         ticker_to_company = dict(zip(portfolio_df['Ticker'], portfolio_df['Security']))
-        scorecard['Company'] = scorecard['Ticker'].map(ticker_to_company).fillna('N/A')
+        scorecard['Company'] = scorecard['Ticker'].apply(
+            lambda x: ticker_to_company.get(x, result[result['Symbol']==x]['Company Name'].iloc[0] if len(result[result['Symbol']==x]) > 0 else 'N/A')
+        )
         
-        # Add fundamental metrics - ALWAYS create columns, fill with N/A if missing
-        # Growth Metrics
-        scorecard['3Y Rev Growth Rank'] = merged.get('"3-Year Revenue Growth Rate (Per Share)" Rank', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['3Y EBITDA Growth Rank'] = merged.get('"3-Year EBITDA Growth Rate (Per Share)" Rank', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['3Y FCF Growth Rank'] = merged.get('"3-Year FCF Growth Rate (Per Share)" Rank', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
+        # Growth Metrics (Ranks) - round to 1 decimal, fill NaN with 'N/A'
+        scorecard['3Y Rev Growth Rank'] = result['"3-Year Revenue Growth Rate (Per Share)" Rank'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['3Y EBITDA Growth Rank'] = result['"3-Year EBITDA Growth Rate (Per Share)" Rank'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['3Y FCF Growth Rank'] = result['"3-Year FCF Growth Rate (Per Share)" Rank'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
         
-        # Profitability Metrics
-        scorecard['Gross Margin %'] = merged.get('Gross Margin %', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['Gross Profit to Asset'] = merged.get('Gross-Profit-to-Asset %', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['ROIC %'] = merged.get('"ROC (ROIC) %"', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['ROIC 5y Median'] = merged.get('"ROC (ROIC) (5y Median)"', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
+        # Profitability Metrics - round to 1 decimal, fill NaN with 'N/A'
+        scorecard['Gross Margin %'] = result['Gross Margin %'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['Gross Profit to Asset'] = result['Gross-Profit-to-Asset %'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['ROIC %'] = result['"ROC (ROIC) %"'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['ROIC 5y Median'] = result['"ROC (ROIC) (5y Median)"'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
         
-        # Quality Metrics
-        scorecard['Years Positive FCF'] = merged.get('Years of Positive FCF over Past 10-Year', pd.Series([None]*len(merged))).fillna(0).apply(lambda x: int(x) if isinstance(x, (int, float)) and not pd.isna(x) else 0)
-        scorecard['Years Profitable'] = merged.get('Years of Profitability over Past 10-Year', pd.Series([None]*len(merged))).fillna(0).apply(lambda x: int(x) if isinstance(x, (int, float)) and not pd.isna(x) else 0)
+        # Quality Metrics - integer, fill NaN with 0
+        scorecard['Years Positive FCF'] = result['Years of Positive FCF over Past 10-Year'].fillna(0).astype(int)
+        scorecard['Years Profitable'] = result['Years of Profitability over Past 10-Year'].fillna(0).astype(int)
         
-        # OBQ Scores
-        scorecard['OBQ Composite'] = merged.get('obq_composite_score', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['OBQ Growth'] = merged.get('obq_growth_score', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['OBQ Quality'] = merged.get('OBQ_Quality_Rank', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['OBQ Momentum'] = merged.get('obq_momentum_score', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['OBQ FinStr'] = merged.get('obq_finstr_score', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['OBQ Value'] = merged.get('obq_value_score', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
+        # OBQ Scores - round to 1 decimal, fill NaN with 'N/A'
+        scorecard['OBQ Composite'] = result['obq_composite_score'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['OBQ Growth'] = result['obq_growth_score'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['OBQ Quality'] = result['OBQ_Quality_Rank'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['OBQ Momentum'] = result['obq_momentum_score'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['OBQ FinStr'] = result['obq_finstr_score'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['OBQ Value'] = result['obq_value_score'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
         
         # Valuation Metrics
-        scorecard['GF Valuation'] = merged.get('GF Valuation', pd.Series(['N/A']*len(merged))).fillna('N/A')
-        scorecard['OBQ GQV'] = merged.get('obq_gqv', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['OBQ GQM'] = merged.get('obq_gqm', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['OBQ VQF'] = merged.get('obq_vqf', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
-        scorecard['OBQ GM'] = merged.get('obq_gm', pd.Series([None]*len(merged))).fillna('N/A').apply(lambda x: round(x, 1) if isinstance(x, (int, float)) else 'N/A')
+        scorecard['GF Valuation'] = result['GF Valuation'].fillna('N/A')
+        scorecard['OBQ GQV'] = result['obq_gqv'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['OBQ GQM'] = result['obq_gqm'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['OBQ VQF'] = result['obq_vqf'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['OBQ GM'] = result['obq_gm'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
         
-        # Keep input order
+        # Maintain portfolio order
         scorecard['order'] = scorecard['Ticker'].map({s: i for i, s in enumerate(valid_tickers)})
         scorecard = scorecard.sort_values('order').drop('order', axis=1).reset_index(drop=True)
         
@@ -724,6 +758,8 @@ def get_fundamentals_from_motherduck(tickers, portfolio_df):
         
     except Exception as e:
         st.error(f"Error fetching fundamentals from MotherDuck: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
         return None
 
 # ============================================================================
