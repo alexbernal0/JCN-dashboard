@@ -13,6 +13,7 @@ import finnhub
 import requests
 import duckdb
 import math
+from scipy import stats
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 # Page configuration
@@ -984,6 +985,340 @@ def create_portfolio_radar_charts(tickers):
         return None
 
 # ============================================================================
+# PORTFOLIO TRENDS FUNCTIONS
+# ============================================================================
+
+def get_last_refresh_time(conn):
+    """Get the last time data was refreshed."""
+    try:
+        result = conn.execute("""
+            SELECT MAX(last_updated) as last_refresh
+            FROM my_db.main.StockDataYfinance4Streamlit
+        """).df()
+        
+        if not result.empty and pd.notna(result['last_refresh'].iloc[0]):
+            return result['last_refresh'].iloc[0]
+        return None
+    except:
+        return None
+
+
+def get_missing_data_range(conn, symbol):
+    """Get the date range that needs to be updated for a symbol."""
+    try:
+        result = conn.execute(f"""
+            SELECT MAX(date) as last_date
+            FROM my_db.main.StockDataYfinance4Streamlit
+            WHERE symbol = '{symbol}'
+        """).df()
+        
+        if not result.empty and pd.notna(result['last_date'].iloc[0]):
+            last_date = pd.to_datetime(result['last_date'].iloc[0])
+            return last_date
+        return None
+    except:
+        return None
+
+
+def update_weekly_data(conn, symbols):
+    """
+    Update weekly data for symbols - only fetch missing data since last update.
+    
+    Returns:
+        tuple: (success_count, failed_count, total_rows_added)
+    """
+    success_count = 0
+    failed_count = 0
+    total_rows = 0
+    
+    for symbol in symbols:
+        try:
+            # Get last date in database
+            last_date = get_missing_data_range(conn, symbol)
+            
+            if last_date is None:
+                # No data exists, download 10 years
+                start_date = datetime.now() - timedelta(days=10*365)
+            else:
+                # Data exists, only get new data
+                start_date = last_date + timedelta(days=1)
+            
+            end_date = datetime.now()
+            
+            # Skip if no new data needed
+            if start_date >= end_date:
+                continue
+            
+            # Download data
+            stock = yf.Ticker(symbol)
+            data = stock.history(start=start_date, end=end_date, interval='1wk')
+            
+            if data.empty:
+                continue
+            
+            # Process data
+            data = data.reset_index()
+            data = data[['Date', 'Open', 'High', 'Low', 'Close']].copy()
+            data['Symbol'] = symbol
+            data['Last_Updated'] = datetime.now()
+            data = data[['Symbol', 'Date', 'Open', 'High', 'Low', 'Close', 'Last_Updated']]
+            data.columns = ['symbol', 'date', 'open', 'high', 'low', 'close', 'last_updated']
+            data['date'] = pd.to_datetime(data['date']).dt.date
+            
+            # Insert data
+            conn.execute("""
+                INSERT OR REPLACE INTO my_db.main.StockDataYfinance4Streamlit
+                SELECT * FROM data
+            """)
+            
+            total_rows += len(data)
+            success_count += 1
+            
+        except Exception as e:
+            failed_count += 1
+            continue
+    
+    return success_count, failed_count, total_rows
+
+
+def fetch_weekly_data(conn, symbols, years=8):
+    """Fetch weekly OHLC data for the last N years."""
+    try:
+        start_date = (datetime.now() - timedelta(days=years*365)).strftime('%Y-%m-%d')
+        symbols_str = "', '".join(symbols)
+        
+        data = conn.execute(f"""
+            SELECT symbol as Symbol, date as Date, open as Open, 
+                   high as High, low as Low, close as Close
+            FROM my_db.main.StockDataYfinance4Streamlit
+            WHERE symbol IN ('{symbols_str}')
+            AND date >= '{start_date}'
+            ORDER BY Symbol, Date
+        """).df()
+        
+        return data
+    except Exception as e:
+        return pd.DataFrame()
+
+
+def create_portfolio_trends_charts(tickers):
+    """
+    Create Plotly candlestick charts with regression and drawdown for portfolio stocks.
+    """
+    try:
+        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
+        if not motherduck_token:
+            return None
+        
+        # Filter valid tickers
+        valid_tickers = [t.strip().upper() for t in tickers if t and t.strip() and t.strip().upper() != 'SPMO']
+        if not valid_tickers:
+            return None
+        
+        # Connect to MotherDuck
+        conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
+        
+        # Fetch 8 years of data
+        price_data = fetch_weekly_data(conn, valid_tickers, years=8)
+        
+        conn.close()
+        
+        if price_data.empty:
+            return None
+        
+        # Filter to symbols with data
+        symbols_with_data = price_data['Symbol'].unique().tolist()
+        symbols = [s for s in valid_tickers if s in symbols_with_data]
+        
+        if not symbols:
+            return None
+        
+        # Calculate grid dimensions (3 columns)
+        n_stocks = len(symbols)
+        n_cols = 3
+        n_rows = math.ceil(n_stocks / n_cols)
+        
+        # Create subplots with secondary y-axis for drawdown
+        fig = make_subplots(
+            rows=n_rows,
+            cols=n_cols,
+            subplot_titles=[f"<b>{sym}</b>" for sym in symbols],
+            vertical_spacing=0.12,
+            horizontal_spacing=0.08,
+            specs=[[{"secondary_y": True}] * n_cols for _ in range(n_rows)]
+        )
+        
+        for idx, symbol in enumerate(symbols):
+            row = (idx // n_cols) + 1
+            col = (idx % n_cols) + 1
+            
+            stock_data = price_data[price_data['Symbol'] == symbol].copy()
+            stock_data = stock_data.sort_values('Date').reset_index(drop=True)
+            
+            if len(stock_data) < 10:
+                continue
+            
+            # Get last 5 years for regression (260 weeks)
+            last_5_years = stock_data.tail(min(260, len(stock_data)))
+            regression_start_idx = len(stock_data) - len(last_5_years)
+            
+            # Calculate regression
+            x_reg = np.arange(len(last_5_years))
+            y_reg = last_5_years['Close'].values
+            slope, intercept, r_value, _, _ = stats.linregress(x_reg, y_reg)
+            r_squared = r_value**2
+            
+            # Calculate CAGR
+            start_price = last_5_years['Close'].iloc[0]
+            end_price = last_5_years['Close'].iloc[-1]
+            years = len(last_5_years) / 52
+            cagr = (end_price / start_price) ** (1/years) - 1 if start_price > 0 else 0
+            system_score = r_squared * cagr
+            
+            # Calculate Avg Annual High-Low Range %
+            stock_data['Year'] = pd.to_datetime(stock_data['Date']).dt.year
+            yearly_ranges = []
+            for year in stock_data['Year'].unique():
+                year_data = stock_data[stock_data['Year'] == year]
+                if len(year_data) > 0:
+                    year_high = year_data['High'].max()
+                    year_low = year_data['Low'].min()
+                    range_pct = ((year_high - year_low) / year_low) * 100 if year_low > 0 else 0
+                    yearly_ranges.append(range_pct)
+            avg_annual_range = np.mean(yearly_ranges) if yearly_ranges else 0
+            
+            # Regression line and confidence bands
+            predicted = intercept + slope * x_reg
+            residuals = y_reg - predicted
+            std_error = np.sqrt(np.sum(residuals**2) / (len(x_reg) - 2))
+            
+            # Dates for regression plot
+            reg_dates = stock_data['Date'].iloc[regression_start_idx:].values
+            
+            # Add candlestick chart
+            fig.add_trace(
+                go.Candlestick(
+                    x=stock_data['Date'],
+                    open=stock_data['Open'],
+                    high=stock_data['High'],
+                    low=stock_data['Low'],
+                    close=stock_data['Close'],
+                    name=symbol,
+                    showlegend=False,
+                    increasing_line_color='#2E7D32',
+                    decreasing_line_color='#C62828'
+                ),
+                row=row, col=col, secondary_y=False
+            )
+            
+            # Add regression line
+            fig.add_trace(
+                go.Scatter(
+                    x=reg_dates,
+                    y=predicted,
+                    mode='lines',
+                    line=dict(color='blue', width=2),
+                    name='Regression',
+                    showlegend=False
+                ),
+                row=row, col=col, secondary_y=False
+            )
+            
+            # Add confidence bands (1, 2, 3 std errors)
+            for std_mult, alpha in [(3, 0.05), (2, 0.08), (1, 0.10)]:
+                fig.add_trace(
+                    go.Scatter(
+                        x=reg_dates,
+                        y=predicted + std_mult*std_error,
+                        mode='lines',
+                        line=dict(width=0),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ),
+                    row=row, col=col, secondary_y=False
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=reg_dates,
+                        y=predicted - std_mult*std_error,
+                        mode='lines',
+                        line=dict(width=0),
+                        fillcolor=f'rgba(128, 128, 128, {alpha})',
+                        fill='tonexty',
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ),
+                    row=row, col=col, secondary_y=False
+                )
+            
+            # Calculate drawdown
+            cummax = stock_data['Close'].cummax()
+            drawdown = ((stock_data['Close'] - cummax) / cummax) * 100
+            current_drawdown = drawdown.iloc[-1]
+            median_dd = drawdown.median()
+            
+            # Add drawdown on secondary y-axis
+            fig.add_trace(
+                go.Scatter(
+                    x=stock_data['Date'],
+                    y=drawdown,
+                    mode='lines',
+                    line=dict(color='darkred', width=1),
+                    fill='tozeroy',
+                    fillcolor='rgba(200, 0, 0, 0.2)',
+                    name='Drawdown',
+                    showlegend=False,
+                    yaxis='y2'
+                ),
+                row=row, col=col, secondary_y=True
+            )
+            
+            # Add median drawdown line
+            fig.add_trace(
+                go.Scatter(
+                    x=stock_data['Date'],
+                    y=[median_dd] * len(stock_data),
+                    mode='lines',
+                    line=dict(color='gray', width=1, dash='dash'),
+                    name='Median DD',
+                    showlegend=False,
+                    yaxis='y2'
+                ),
+                row=row, col=col, secondary_y=True
+            )
+            
+            # Update subplot title with metrics
+            fig.layout.annotations[idx].update(
+                text=f"<b>{symbol}</b><br>" +
+                     f"<span style='font-size:9px'>SystemScore: {system_score:.4f} | R²: {r_squared:.4f} | CAGR: {cagr:.2%}<br>" +
+                     f"Avg Annual Range: {avg_annual_range:.1f}% | Current DD: {current_drawdown:.1f}%</span>"
+            )
+            
+            # Update y-axes
+            fig.update_yaxes(title_text="Price ($)", row=row, col=col, secondary_y=False)
+            fig.update_yaxes(title_text="DD %", row=row, col=col, secondary_y=True, 
+                           range=[drawdown.min() * 1.1, 5])
+        
+        # Update layout
+        fig.update_layout(
+            height=500 * n_rows,
+            showlegend=False,
+            paper_bgcolor='white',
+            plot_bgcolor='white',
+            margin=dict(l=40, r=40, t=80, b=40),
+            xaxis_rangeslider_visible=False
+        )
+        
+        # Update all x-axes to hide rangeslider
+        fig.update_xaxes(rangeslider_visible=False)
+        
+        return fig
+        
+    except Exception as e:
+        st.error(f"Error creating trend charts: {str(e)}")
+        return None
+
+# ============================================================================
 # NEWS AGGREGATION FUNCTIONS
 # ============================================================================
 
@@ -1803,6 +2138,96 @@ with st.spinner("Loading radar charts from MotherDuck..."):
         st.caption("💡 Color intensity indicates relative performance: Brightest green = highest composite score, Lighter teal = lowest composite score")
     else:
         st.info("No radar chart data available from MotherDuck for portfolio stocks.")
+
+# ============================================================================
+# PORTFOLIO TRENDS SECTION
+# ============================================================================
+st.markdown("---")
+
+# Auto-refresh check (Friday 5 PM EST)
+try:
+    from datetime import timezone
+    import pytz
+    
+    est = pytz.timezone('US/Eastern')
+    now_est = datetime.now(est)
+    
+    # Check if it's Friday after 5 PM
+    if now_est.weekday() == 4 and now_est.hour >= 17:  # Friday = 4
+        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
+        if motherduck_token and tickers:
+            conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
+            last_refresh = get_last_refresh_time(conn)
+            
+            # Only auto-refresh if last refresh was before this Friday 5 PM
+            if last_refresh:
+                last_refresh_est = last_refresh.astimezone(est)
+                friday_5pm = now_est.replace(hour=17, minute=0, second=0, microsecond=0)
+                
+                if last_refresh_est < friday_5pm:
+                    # Auto-refresh needed
+                    success, failed, total_rows = update_weekly_data(conn, tickers)
+                    if total_rows > 0:
+                        st.success(f"✅ Auto-refreshed {success} stocks ({total_rows} new weeks) - Friday 5 PM EST")
+            
+            conn.close()
+except:
+    pass
+
+# Header with refresh button and timestamp
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.subheader("📈 Portfolio Trends")
+    
+    # Get last refresh time
+    try:
+        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
+        if motherduck_token:
+            conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
+            last_refresh = get_last_refresh_time(conn)
+            conn.close()
+            
+            if last_refresh:
+                st.caption(f"🕒 Last data refresh: {last_refresh.strftime('%Y-%m-%d %I:%M %p EST')}")
+            else:
+                st.caption("⚠️ No data found - please run initial data population script")
+    except:
+        pass
+
+with col2:
+    if st.button("🔄 Refresh Data", use_container_width=True, key="refresh_trends_data"):
+        with st.spinner("Updating weekly data..."):
+            try:
+                motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
+                if motherduck_token:
+                    conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
+                    success, failed, total_rows = update_weekly_data(conn, tickers)
+                    conn.close()
+                    
+                    if total_rows > 0:
+                        st.success(f"✅ Updated {success} stocks ({total_rows} new weeks)")
+                    else:
+                        st.info("✅ Data is already up to date")
+                    
+                    if failed > 0:
+                        st.warning(f"⚠️ {failed} stocks failed to update")
+                else:
+                    st.error("MotherDuck token not configured")
+            except Exception as e:
+                st.error(f"Error updating data: {str(e)}")
+
+# Display charts
+if tickers:
+    with st.spinner("Loading trend charts from MotherDuck..."):
+        trends_fig = create_portfolio_trends_charts(tickers)
+        
+        if trends_fig is not None:
+            st.plotly_chart(trends_fig, use_container_width=True)
+            st.caption("💡 8 years of weekly OHLC data with 5-year regression line. Drawdown shown below each chart.")
+        else:
+            st.info("⚠️ No trend data available. Please run the initial data population script in Data_Management folder.")
+else:
+    st.info("👇 Add stocks to your portfolio to see trend charts.")
 
 # ============================================================================
 # GROK NEWS AGGREGATOR SECTION

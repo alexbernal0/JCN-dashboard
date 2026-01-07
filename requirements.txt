@@ -8,3 +8,5 @@ finnhub-python>=2.4.0
 requests>=2.31.0
 duckdb>=0.9.0
 streamlit-aggrid>=1.2.0
+scipy>=1.11.0
+pytz>=2023.3
