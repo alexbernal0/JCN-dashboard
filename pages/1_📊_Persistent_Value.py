@@ -1539,10 +1539,34 @@ if 'portfolio_data' in st.session_state and not st.session_state.portfolio_data.
         gb.configure_column("Ticker", pinned='left', width=80, suppressSizeToFit=True)
         gb.configure_column("Company", pinned='left', width=200, suppressSizeToFit=True)
         
-        # Configure other columns
+        # Configure other columns with appropriate widths for readability
+        column_widths = {
+            '3Y Rev Growth Rank': 160,
+            '3Y EBITDA Growth Rank': 180,
+            '3Y FCF Growth Rank': 160,
+            'Gross Margin %': 130,
+            'Gross Profit to Asset': 170,
+            'ROIC %': 100,
+            'ROIC 5y Median': 140,
+            'Years Positive FCF': 150,
+            'Years Profitable': 140,
+            'OBQ Composite': 140,
+            'OBQ Growth': 120,
+            'OBQ Quality': 120,
+            'OBQ Momentum': 140,
+            'OBQ FinStr': 120,
+            'OBQ Value': 120,
+            'GF Valuation': 130,
+            'OBQ GQV': 110,
+            'OBQ GQM': 110,
+            'OBQ VQF': 110,
+            'OBQ GM': 110
+        }
+        
         for col in fundamentals_df.columns:
             if col not in ['Ticker', 'Company']:
-                gb.configure_column(col, width=120)
+                width = column_widths.get(col, 140)  # Default 140px if not specified
+                gb.configure_column(col, width=width, minWidth=width)
         
         # Enable sorting and filtering
         gb.configure_default_column(sortable=True, filterable=False, resizable=True)
