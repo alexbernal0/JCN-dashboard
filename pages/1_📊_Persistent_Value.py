@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import yfinance as yf
 from datetime import datetime, timedelta
 from PIL import Image
@@ -333,6 +334,274 @@ def calculate_portfolio_daily_change(portfolio_df):
         return weighted_daily_change
     except Exception as e:
         return 0.0
+
+# ============================================================================
+# PORTFOLIO ALLOCATION FUNCTIONS
+# ============================================================================
+
+def get_category_style(ticker):
+    """
+    Get category style (e.g., Large Growth, Mid Value) from yfinance.
+    
+    Parameters:
+    -----------
+    ticker : str
+        Stock ticker symbol
+    
+    Returns:
+    --------
+    str
+        Category style (e.g., 'Large Growth', 'Mid Value', 'Small Blend')
+    """
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        # Try to get category directly from yfinance first
+        category = info.get('category', None)
+        if category:
+            return category
+        
+        fund_category = info.get('fundCategory', None)
+        if fund_category:
+            return fund_category
+            
+        style_box = info.get('styleBox', None)
+        if style_box:
+            return style_box
+        
+        # Fallback: construct from market cap and style metrics
+        market_cap = info.get('marketCap', 0)
+        
+        # Determine size category
+        if market_cap >= 10_000_000_000:  # $10B+
+            size = 'Large'
+        elif market_cap >= 2_000_000_000:  # $2B - $10B
+            size = 'Mid'
+        else:
+            size = 'Small'
+        
+        # Try to determine growth/value from PE ratio and other metrics
+        pe_ratio = info.get('trailingPE', None)
+        pb_ratio = info.get('priceToBook', None)
+        
+        # Simple heuristic for growth vs value
+        if pe_ratio is not None and pb_ratio is not None:
+            if pe_ratio > 25 or pb_ratio > 3:
+                style = 'Growth'
+            elif pe_ratio < 15 and pb_ratio < 2:
+                style = 'Value'
+            else:
+                style = 'Blend'
+        else:
+            style = 'Blend'
+        
+        return f"{size} {style}"
+        
+    except Exception as e:
+        return 'Unknown'
+
+def prepare_company_data(portfolio_df):
+    """Prepare data for company allocation pie chart."""
+    company_data = []
+    for idx, row in portfolio_df.iterrows():
+        security = row.get('Security', 'Unknown')
+        ticker = row.get('Ticker', '')
+        port_pct = row.get('Port_Pct', 0)
+        
+        company_data.append({
+            'Company': security,
+            'Ticker': ticker,
+            'Percentage': port_pct
+        })
+    
+    return pd.DataFrame(company_data)
+
+def prepare_category_data(portfolio_df):
+    """Prepare data for category style allocation pie chart."""
+    category_data = {}
+    
+    for idx, row in portfolio_df.iterrows():
+        ticker = row.get('Ticker', '')
+        security = row.get('Security', ticker)
+        port_pct = row.get('Port_Pct', 0)
+        
+        # Get category style
+        category = get_category_style(ticker)
+        
+        if category not in category_data:
+            category_data[category] = {
+                'percentage': 0,
+                'companies': []
+            }
+        
+        category_data[category]['percentage'] += port_pct
+        category_data[category]['companies'].append(security)
+    
+    # Convert to DataFrame
+    df_data = []
+    for category, data in category_data.items():
+        df_data.append({
+            'Category': category,
+            'Percentage': data['percentage'],
+            'Companies': ', '.join(data['companies'])
+        })
+    
+    return pd.DataFrame(df_data)
+
+def prepare_sector_data(portfolio_df):
+    """Prepare data for sector allocation pie chart."""
+    sector_data = {}
+    
+    for idx, row in portfolio_df.iterrows():
+        sector = row.get('Sector', 'Unknown')
+        
+        # Skip N/A sectors
+        if sector == 'N/A' or sector == 'Unknown':
+            continue
+        
+        port_pct = row.get('Port_Pct', 0)
+        
+        if sector not in sector_data:
+            sector_data[sector] = 0
+        
+        sector_data[sector] += port_pct
+    
+    # Convert to DataFrame
+    df_data = [{'Sector': k, 'Percentage': v} for k, v in sector_data.items()]
+    return pd.DataFrame(df_data)
+
+def prepare_industry_data(portfolio_df):
+    """Prepare data for industry allocation pie chart."""
+    industry_data = {}
+    
+    for idx, row in portfolio_df.iterrows():
+        industry = row.get('Industry', 'Unknown')
+        
+        # Skip N/A industries
+        if industry == 'N/A' or industry == 'Unknown':
+            continue
+        
+        port_pct = row.get('Port_Pct', 0)
+        
+        if industry not in industry_data:
+            industry_data[industry] = 0
+        
+        industry_data[industry] += port_pct
+    
+    # Convert to DataFrame
+    df_data = [{'Industry': k, 'Percentage': v} for k, v in industry_data.items()]
+    return pd.DataFrame(df_data)
+
+def create_portfolio_pie_charts(portfolio_df):
+    """
+    Create 2x2 grid of pie charts for portfolio allocation analysis.
+    
+    Parameters:
+    -----------
+    portfolio_df : pd.DataFrame
+        Portfolio DataFrame (before formatting)
+    
+    Returns:
+    --------
+    plotly.graph_objects.Figure
+        2x2 grid of pie charts
+    """
+    # Prepare data for each chart
+    company_df = prepare_company_data(portfolio_df)
+    category_df = prepare_category_data(portfolio_df)
+    sector_df = prepare_sector_data(portfolio_df)
+    industry_df = prepare_industry_data(portfolio_df)
+    
+    # Create subplots: 2 rows, 2 columns
+    fig = make_subplots(
+        rows=2, cols=2,
+        specs=[[{'type': 'pie'}, {'type': 'pie'}],
+               [{'type': 'pie'}, {'type': 'pie'}]],
+        subplot_titles=('Company Allocation', 'Category Style Allocation',
+                       'Sector Allocation', 'Industry Allocation')
+    )
+    
+    # Subtle color palette (muted/pastel colors)
+    colors = [
+        '#B8D4E3', '#D4E3B8', '#E3D4B8', '#E3B8D4',
+        '#B8E3D4', '#D4B8E3', '#E3B8B8', '#B8E3B8',
+        '#C8D8E8', '#E8D8C8', '#D8C8E8', '#C8E8D8',
+        '#E8C8D8', '#D8E8C8', '#C8C8E8', '#E8E8C8',
+        '#A8C8D8', '#D8C8A8', '#C8A8D8', '#A8D8C8'
+    ]
+    
+    # Chart 1: Company Allocation (Top Left)
+    fig.add_trace(
+        go.Pie(
+            labels=company_df['Ticker'],
+            values=company_df['Percentage'],
+            text=company_df['Ticker'],
+            textposition='inside',
+            textinfo='text',
+            textfont=dict(size=10, color='black'),
+            hovertemplate='<b>%{customdata}</b><br>%{percent}<extra></extra>',
+            customdata=company_df['Company'],
+            marker=dict(colors=colors),
+            name='Company'
+        ),
+        row=1, col=1
+    )
+    
+    # Chart 2: Category Style Allocation (Top Right)
+    fig.add_trace(
+        go.Pie(
+            labels=category_df['Category'],
+            values=category_df['Percentage'],
+            textposition='inside',
+            textinfo='label+percent',
+            textfont=dict(size=10),
+            hovertemplate='<b>%{label}</b><br>%{percent}<br>Companies: %{customdata}<extra></extra>',
+            customdata=category_df['Companies'],
+            marker=dict(colors=colors),
+            name='Category'
+        ),
+        row=1, col=2
+    )
+    
+    # Chart 3: Sector Allocation (Bottom Left)
+    fig.add_trace(
+        go.Pie(
+            labels=sector_df['Sector'],
+            values=sector_df['Percentage'],
+            textposition='inside',
+            textinfo='label',
+            textfont=dict(size=10),
+            hovertemplate='<b>%{label}</b><br>%{percent}<extra></extra>',
+            marker=dict(colors=colors),
+            name='Sector'
+        ),
+        row=2, col=1
+    )
+    
+    # Chart 4: Industry Allocation (Bottom Right)
+    fig.add_trace(
+        go.Pie(
+            labels=industry_df['Industry'],
+            values=industry_df['Percentage'],
+            textposition='inside',
+            textinfo='label',
+            textfont=dict(size=9),
+            hovertemplate='<b>%{label}</b><br>%{percent}<extra></extra>',
+            marker=dict(colors=colors),
+            name='Industry'
+        ),
+        row=2, col=2
+    )
+    
+    # Update layout
+    fig.update_layout(
+        showlegend=False,
+        height=700,
+        margin=dict(t=50, b=20, l=20, r=20)
+    )
+    
+    return fig
 
 # ============================================================================
 # NEWS AGGREGATION FUNCTIONS
@@ -947,35 +1216,13 @@ if tickers and len(tickers) > 0:
             
             st.markdown("---")
             
-            # Performance Summary
-            st.subheader("📈 Performance Summary")
+            # Portfolio Allocation
+            st.subheader("📊 Portfolio Allocation")
             
-            best_idx = perf_df['Port_Gain_Pct'].idxmax()
-            worst_idx = perf_df['Port_Gain_Pct'].idxmin()
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric(
-                    label="📈 Best Performer",
-                    value=perf_df.loc[best_idx, 'Ticker'],
-                    delta=f"+{perf_df.loc[best_idx, 'Port_Gain_Pct']:.2f}%"
-                )
-            
-            with col2:
-                st.metric(
-                    label="📉 Worst Performer",
-                    value=perf_df.loc[worst_idx, 'Ticker'],
-                    delta=f"{perf_df.loc[worst_idx, 'Port_Gain_Pct']:.2f}%"
-                )
-            
-            with col3:
-                avg_performance = perf_df['Port_Gain_Pct'].mean()
-                st.metric(
-                    label="📊 Average Performance",
-                    value=f"{avg_performance:.2f}%",
-                    delta=f"{len(tickers)} stocks tracked"
-                )
+            # Create pie charts using the raw portfolio dataframe
+            with st.spinner("Generating allocation charts..."):
+                allocation_fig = create_portfolio_pie_charts(perf_df)
+                st.plotly_chart(allocation_fig, use_container_width=True)
             
             st.markdown("---")
             
