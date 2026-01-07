@@ -652,16 +652,41 @@ def get_fundamentals_from_motherduck(tickers, portfolio_df):
         )
         SELECT 
             gf.*,
-            obq.obq_composite_score,
             obq.obq_growth_score,
             obq.OBQ_Quality_Rank,
             obq.obq_momentum_score,
             obq.obq_finstr_score,
             obq.obq_value_score,
-            obq.obq_gqv,
-            obq.obq_gqm,
-            obq.obq_vqf,
-            obq.obq_gm
+            -- Compute OBQ GM (always available)
+            CASE 
+                WHEN obq.obq_growth_score IS NOT NULL AND obq.obq_momentum_score IS NOT NULL
+                THEN (obq.obq_growth_score + obq.obq_momentum_score) / 2.0
+                ELSE NULL
+            END as computed_obq_gm,
+            -- Compute OBQ GQM (always available)
+            CASE 
+                WHEN obq.obq_growth_score IS NOT NULL AND obq.OBQ_Quality_Rank IS NOT NULL AND obq.obq_momentum_score IS NOT NULL
+                THEN (obq.obq_growth_score + obq.OBQ_Quality_Rank + obq.obq_momentum_score) / 3.0
+                ELSE NULL
+            END as computed_obq_gqm,
+            -- Compute OBQ GQV (only if value score exists)
+            CASE 
+                WHEN obq.obq_value_score IS NOT NULL AND obq.obq_growth_score IS NOT NULL AND obq.OBQ_Quality_Rank IS NOT NULL
+                THEN (obq.obq_growth_score + obq.OBQ_Quality_Rank + obq.obq_value_score) / 3.0
+                ELSE NULL
+            END as computed_obq_gqv,
+            -- Compute OBQ VQF (only if value score exists)
+            CASE 
+                WHEN obq.obq_value_score IS NOT NULL AND obq.OBQ_Quality_Rank IS NOT NULL AND obq.obq_finstr_score IS NOT NULL
+                THEN (obq.obq_value_score + obq.OBQ_Quality_Rank + obq.obq_finstr_score) / 3.0
+                ELSE NULL
+            END as computed_obq_vqf,
+            -- Compute OBQ Composite (only if value score exists)
+            CASE 
+                WHEN obq.obq_value_score IS NOT NULL AND obq.obq_growth_score IS NOT NULL AND obq.obq_momentum_score IS NOT NULL AND obq.OBQ_Quality_Rank IS NOT NULL AND obq.obq_finstr_score IS NOT NULL
+                THEN (obq.obq_growth_score + obq.obq_momentum_score + obq.OBQ_Quality_Rank + (0.5 * obq.obq_value_score) + (0.5 * obq.obq_finstr_score)) / 5.0
+                ELSE NULL
+            END as computed_obq_composite
         FROM my_db.main.gurufocus_with_momentum gf
         LEFT JOIN latest_obq obq ON gf.Symbol = obq.symbol
         WHERE gf.Symbol IN ('{symbols_str}')
@@ -715,10 +740,7 @@ def get_fundamentals_from_motherduck(tickers, portfolio_df):
         scorecard['Years Positive FCF'] = result['Years of Positive FCF over Past 10-Year'].fillna(0).astype(int)
         scorecard['Years Profitable'] = result['Years of Profitability over Past 10-Year'].fillna(0).astype(int)
         
-        # OBQ Scores - round to 1 decimal, fill NaN with 'N/A'
-        scorecard['OBQ Composite'] = result['obq_composite_score'].apply(
-            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
-        )
+        # OBQ Base Scores - round to 1 decimal, fill NaN with 'N/A'
         scorecard['OBQ Growth'] = result['obq_growth_score'].apply(
             lambda x: round(x, 1) if pd.notna(x) else 'N/A'
         )
@@ -735,20 +757,25 @@ def get_fundamentals_from_motherduck(tickers, portfolio_df):
             lambda x: round(x, 1) if pd.notna(x) else 'N/A'
         )
         
+        # OBQ Composite Scores - use computed values
+        scorecard['OBQ Composite'] = result['computed_obq_composite'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['OBQ GM'] = result['computed_obq_gm'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['OBQ GQM'] = result['computed_obq_gqm'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['OBQ GQV'] = result['computed_obq_gqv'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        scorecard['OBQ VQF'] = result['computed_obq_vqf'].apply(
+            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
+        )
+        
         # Valuation Metrics
         scorecard['GF Valuation'] = result['GF Valuation'].fillna('N/A')
-        scorecard['OBQ GQV'] = result['obq_gqv'].apply(
-            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
-        )
-        scorecard['OBQ GQM'] = result['obq_gqm'].apply(
-            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
-        )
-        scorecard['OBQ VQF'] = result['obq_vqf'].apply(
-            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
-        )
-        scorecard['OBQ GM'] = result['obq_gm'].apply(
-            lambda x: round(x, 1) if pd.notna(x) else 'N/A'
-        )
         
         # Maintain portfolio order
         scorecard['order'] = scorecard['Ticker'].map({s: i for i, s in enumerate(valid_tickers)})
