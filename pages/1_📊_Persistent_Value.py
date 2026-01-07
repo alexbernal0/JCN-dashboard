@@ -44,6 +44,7 @@ st.markdown("""
 # Cache file paths
 CACHE_FILE = "portfolio_cache.json"
 NEWS_CACHE_FILE = "news_cache.json"
+SUMMARY_CACHE_FILE = "portfolio_summary_cache.json"
 
 # API Keys for news aggregation (using Streamlit secrets)
 # Configure these in Streamlit Cloud: Settings > Secrets
@@ -505,6 +506,124 @@ def load_news_from_cache():
         pass
     return None, None
 
+# Portfolio Summary Generation Functions
+def generate_stock_summary_grok(ticker, articles):
+    """Generate AI summary for a single stock using Grok API"""
+    try:
+        # Prepare articles text
+        articles_text = f"Stock: {ticker}\n\n"
+        for i, article in enumerate(articles, 1):
+            articles_text += f"Article {i}:\n"
+            articles_text += f"Headline: {article['headline']}\n"
+            articles_text += f"Summary: {article['summary']}\n\n"
+        
+        payload = {
+            "model": "grok-3",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a senior financial analyst writing daily market summaries for institutional investors."
+                },
+                {
+                    "role": "user",
+                    "content": f"""Based on the following news articles about {ticker}, write a comprehensive 6-8 sentence paragraph summarizing the key developments, market sentiment, and implications for portfolio managers.
+
+Focus on:
+1. Main themes and narratives
+2. Specific events or announcements
+3. Market sentiment and analyst views
+4. Actionable insights for investors
+5. Risk factors or concerns
+
+Articles:
+{articles_text}
+
+Provide only the summary paragraph, no additional commentary."""
+                }
+            ],
+            "stream": False,
+            "temperature": 0.7
+        }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {GROK_API_KEY}"
+        }
+        
+        response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            summary = result['choices'][0]['message']['content'].strip()
+            return summary
+        else:
+            return f"Error generating summary: {response.status_code}"
+            
+    except Exception as e:
+        return f"Error generating summary: {str(e)}"
+
+def generate_portfolio_summary(news_df, portfolio_symbols):
+    """Generate comprehensive portfolio summary from news articles"""
+    # Group articles by stock
+    articles_by_stock = {}
+    for _, row in news_df.iterrows():
+        ticker = row['Stock Ticker']
+        if ticker not in articles_by_stock:
+            articles_by_stock[ticker] = []
+        
+        articles_by_stock[ticker].append({
+            'headline': row['Article Summary'][:100],
+            'summary': row['Article Summary'],
+            'datetime': pd.to_datetime(row['Datetime']),
+            'url': row['Article Link']
+        })
+    
+    # Generate summaries for each stock
+    summaries = {}
+    for ticker in portfolio_symbols:
+        if ticker in articles_by_stock:
+            articles = articles_by_stock[ticker]
+            summary = generate_stock_summary_grok(ticker, articles)
+            summaries[ticker] = {
+                'article_count': len(articles),
+                'summary': summary
+            }
+            time.sleep(1)  # Rate limiting
+    
+    return summaries
+
+def save_summary_to_cache(summaries, timestamp):
+    """Save portfolio summary to cache file"""
+    try:
+        cache_data = {
+            'summaries': summaries,
+            'timestamp': timestamp.isoformat()
+        }
+        with open(SUMMARY_CACHE_FILE, 'w') as f:
+            json.dump(cache_data, f)
+    except Exception as e:
+        st.error(f"Error saving summary cache: {str(e)}")
+
+def load_summary_from_cache():
+    """Load portfolio summary from cache file"""
+    try:
+        if os.path.exists(SUMMARY_CACHE_FILE):
+            with open(SUMMARY_CACHE_FILE, 'r') as f:
+                cache_data = json.load(f)
+            
+            summaries = cache_data['summaries']
+            timestamp = datetime.fromisoformat(cache_data['timestamp'])
+            
+            return summaries, timestamp
+    except Exception as e:
+        pass
+    return None, None
+
 # Check if we should fetch fresh data
 should_fetch_fresh = False
 
@@ -858,6 +977,109 @@ else:
 # GROK NEWS AGGREGATOR SECTION
 # ============================================================================
 st.markdown("---")
+st.markdown("---")
+
+# ============================================================================
+# PORTFOLIO NEWS SUMMARY SECTION
+# ============================================================================
+
+st.markdown("---")
+
+# Initialize session state for summary refresh
+if 'force_summary_refresh' not in st.session_state:
+    st.session_state.force_summary_refresh = False
+if 'last_summary_refresh' not in st.session_state:
+    st.session_state.last_summary_refresh = None
+
+# Header with regenerate button
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.subheader("📝 Portfolio News Summary")
+with col2:
+    if st.button("🔄 Regenerate Summary", use_container_width=True):
+        st.session_state.force_summary_refresh = True
+        st.rerun()
+
+# Check if portfolio exists
+if 'portfolio_data' in st.session_state and not st.session_state.portfolio_data.empty:
+    portfolio_symbols = st.session_state.portfolio_data['Symbol'].tolist()
+    
+    # Check if we should generate fresh summary
+    should_generate_fresh_summary = False
+    
+    # Check for force refresh (user clicked button)
+    if st.session_state.force_summary_refresh:
+        should_generate_fresh_summary = True
+        st.session_state.force_summary_refresh = False
+    
+    # Check for auto-refresh (daily at midnight)
+    if st.session_state.last_summary_refresh:
+        now = datetime.now()
+        last_refresh = st.session_state.last_summary_refresh
+        # Check if it's a new day
+        if now.date() > last_refresh.date():
+            should_generate_fresh_summary = True
+    
+    # Try to load from cache first
+    cached_summaries, cached_summary_time = load_summary_from_cache()
+    
+    # Check if we have news articles to summarize
+    cached_news, _ = load_news_from_cache()
+    
+    if cached_news is not None and len(cached_news) > 0:
+        # If we should generate fresh summary, try to generate it
+        if should_generate_fresh_summary or cached_summaries is None:
+            with st.spinner("🤖 Generating AI-powered portfolio summary... This may take 3-5 minutes."):
+                try:
+                    summaries = generate_portfolio_summary(cached_news, portfolio_symbols)
+                    summary_timestamp = datetime.now()
+                    
+                    # Save to cache
+                    save_summary_to_cache(summaries, summary_timestamp)
+                    
+                    # Update session state
+                    st.session_state.last_summary_refresh = summary_timestamp
+                    
+                    st.success("✅ Portfolio summary generated successfully!")
+                except Exception as e:
+                    st.error(f"Error generating summary: {str(e)}")
+                    # Fall back to cached summaries if available
+                    if cached_summaries:
+                        summaries = cached_summaries
+                        summary_timestamp = cached_summary_time
+                        st.info("📦 Loaded from cache due to error.")
+                    else:
+                        summaries = None
+                        summary_timestamp = None
+        else:
+            # Use cached summaries
+            summaries = cached_summaries
+            summary_timestamp = cached_summary_time
+            if summaries:
+                st.info(f"📦 Loaded from cache (Last updated: {summary_timestamp.strftime('%Y-%m-%d %I:%M:%S %p')} EST)")
+        
+        # Display summaries
+        if summaries and len(summaries) > 0:
+            st.markdown(f"**{len(summaries)} stocks analyzed** | **Generated: {summary_timestamp.strftime('%B %d, %Y at %I:%M %p EST')}**")
+            st.markdown("")
+            
+            # Display each stock summary in an expander
+            for ticker in portfolio_symbols:
+                if ticker in summaries:
+                    summary_data = summaries[ticker]
+                    with st.expander(f"📊 **{ticker}** ({summary_data['article_count']} articles)", expanded=False):
+                        st.markdown(summary_data['summary'])
+        else:
+            st.info("💡 No summaries available. Click 'Regenerate Summary' to generate AI-powered analysis.")
+    else:
+        st.info("💡 No news articles available. Load news first using the Grok News Aggregator below.")
+else:
+    st.info("👇 Add stocks to your portfolio to see AI-powered news summaries.")
+
+# ============================================================================
+# GROK NEWS AGGREGATOR SECTION
+# ============================================================================
+
 st.markdown("---")
 
 # Initialize session state for news refresh
