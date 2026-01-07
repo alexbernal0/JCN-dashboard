@@ -12,6 +12,7 @@ import os
 import finnhub
 import requests
 import duckdb
+import math
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 # Page configuration
@@ -787,6 +788,199 @@ def get_fundamentals_from_motherduck(tickers, portfolio_df):
         st.error(f"Error fetching fundamentals from MotherDuck: {str(e)}")
         import traceback
         st.error(traceback.format_exc())
+        return None
+
+# ============================================================================
+# PORTFOLIO RADAR CHARTS FUNCTIONS
+# ============================================================================
+
+def get_green_gradient_color(score, min_score, max_score):
+    """
+    Get color from Teal to Bright Green gradient based on score.
+    Lowest score = Teal (#4DB8A8)
+    Highest score = Bright Green (#00C851)
+    """
+    # Avoid division by zero
+    if max_score == min_score:
+        normalized = 0.5
+    else:
+        normalized = (score - min_score) / (max_score - min_score)
+    
+    # Teal RGB: (77, 184, 168) = #4DB8A8
+    # Bright Green RGB: (0, 200, 81) = #00C851
+    start_r, start_g, start_b = 77, 184, 168
+    end_r, end_g, end_b = 0, 200, 81
+    
+    # Interpolate
+    r = int(start_r + (end_r - start_r) * normalized)
+    g = int(start_g + (end_g - start_g) * normalized)
+    b = int(start_b + (end_b - start_b) * normalized)
+    
+    line_color = f'rgb({r}, {g}, {b})'
+    fill_color = f'rgba({r}, {g}, {b}, 0.5)'
+    
+    return line_color, fill_color
+
+
+def create_portfolio_radar_charts(tickers):
+    """
+    Create radar charts for portfolio stocks with dynamic color scheme.
+    Color intensity based on relative composite scores (heatmap style).
+    """
+    try:
+        # Get MotherDuck token
+        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
+        if not motherduck_token:
+            return None
+        
+        # Filter out empty tickers and SPMO
+        valid_tickers = [t.strip().upper() for t in tickers if t and t.strip() and t.strip().upper() != 'SPMO']
+        if not valid_tickers:
+            return None
+        
+        symbols_str = "', '".join(valid_tickers)
+        
+        # Connect to MotherDuck
+        conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
+        
+        # Get GuruFocus data for all symbols
+        data = conn.execute(f"""
+            SELECT * FROM my_db.main.gurufocus_with_momentum 
+            WHERE Symbol IN ('{symbols_str}')
+        """).df()
+        
+        conn.close()
+        
+        if data.empty:
+            return None
+        
+        # Filter symbols to only those with data
+        symbols_with_data = data['Symbol'].unique().tolist()
+        symbols = [s for s in valid_tickers if s in symbols_with_data]
+        
+        if not symbols:
+            return None
+        
+        # Calculate composite scores for all stocks first (for min/max)
+        composite_scores = {}
+        for ticker in symbols:
+            ticker_data = data[data['Symbol'] == ticker]
+            if not ticker_data.empty:
+                profitability_rank = ticker_data['"Profitability Rank"'].iloc[0]
+                quality_rank = ticker_data['"Quality Rank"'].iloc[0]
+                growth_rank = ticker_data['"Growth Rank"'].iloc[0]
+                financial_strength = ticker_data['Financial Strength'].iloc[0]
+                value_rank = ticker_data['JCN Value Rank'].iloc[0] / 10
+                momentum = ticker_data['JCN Mom'].iloc[0] / 10
+                
+                composite = (profitability_rank + quality_rank + growth_rank + 
+                           financial_strength + value_rank + momentum) / 6
+                composite_scores[ticker] = composite
+        
+        # Get min and max composite scores for color scaling
+        min_composite = min(composite_scores.values())
+        max_composite = max(composite_scores.values())
+        
+        # Calculate grid dimensions (3 columns)
+        n_stocks = len(symbols)
+        n_cols = 3
+        n_rows = math.ceil(n_stocks / n_cols)
+        
+        # Create subplot grid with polar charts
+        fig = make_subplots(
+            rows=n_rows, 
+            cols=n_cols,
+            specs=[[{'type': 'polar'}] * n_cols for _ in range(n_rows)],
+            subplot_titles=[f"<b>{sym}</b>" for sym in symbols],
+            vertical_spacing=0.08,
+            horizontal_spacing=0.05
+        )
+        
+        # Categories for radar chart
+        categories = ['Profitability', 'Quality', 'Growth', 'Financial<br>Strength', 'Value', 'Momentum']
+        
+        # Add radar chart for each stock
+        for idx, ticker in enumerate(symbols):
+            row = (idx // n_cols) + 1
+            col = (idx % n_cols) + 1
+            
+            ticker_data = data[data['Symbol'] == ticker]
+            
+            if not ticker_data.empty:
+                # Extract metrics (all on 0-10 scale)
+                profitability_rank = ticker_data['"Profitability Rank"'].iloc[0]
+                quality_rank = ticker_data['"Quality Rank"'].iloc[0]
+                growth_rank = ticker_data['"Growth Rank"'].iloc[0]
+                financial_strength = ticker_data['Financial Strength'].iloc[0]
+                value_rank = ticker_data['JCN Value Rank'].iloc[0] / 10
+                momentum = ticker_data['JCN Mom'].iloc[0] / 10
+                
+                # Get title metrics
+                jcn_pv_rank = ticker_data['JCN PV'].iloc[0]
+                jcn_olivia = ticker_data['JCN Olivia'].iloc[0]
+                
+                # Get composite score
+                jcn_composite = composite_scores[ticker]
+                
+                values = [profitability_rank, quality_rank, growth_rank, 
+                         financial_strength, value_rank, momentum]
+                
+                # Get color based on relative composite score (heatmap style)
+                line_color, fill_color = get_green_gradient_color(jcn_composite, min_composite, max_composite)
+                
+                # Add trace
+                fig.add_trace(go.Scatterpolar(
+                    r=values,
+                    theta=categories,
+                    fill='toself',
+                    fillcolor=fill_color,
+                    line=dict(color=line_color, width=2),
+                    name=ticker,
+                    showlegend=False
+                ), row=row, col=col)
+                
+                # Update subplot title
+                fig.layout.annotations[idx].update(
+                    text=f"<b>{ticker}</b><br>" +
+                         f"<span style='font-size:10px'>Composite: <b>{jcn_composite:.1f}</b> | " +
+                         f"PV: {jcn_pv_rank:.1f} | Olivia: {jcn_olivia:.1f}</span>"
+                )
+        
+        # Update all polar axes
+        for i in range(1, n_stocks + 1):
+            fig.update_polars(
+                bgcolor='rgba(255, 255, 255, 0.9)',
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 10],
+                    tickvals=[0, 2, 4, 6, 8, 10],
+                    ticktext=['0', '2', '4', '6', '8', '10'],
+                    gridcolor='rgba(200, 200, 200, 0.5)',
+                    gridwidth=1,
+                    tickfont=dict(size=8)
+                ),
+                angularaxis=dict(
+                    gridcolor='rgba(200, 200, 200, 0.5)',
+                    gridwidth=1,
+                    tickfont=dict(size=9)
+                ),
+                selector=dict(type='polar')
+            )
+        
+        # Update layout
+        fig.update_layout(
+            height=400 * n_rows,
+            showlegend=False,
+            paper_bgcolor='white',
+            plot_bgcolor='white',
+            margin=dict(l=40, r=40, t=60, b=40),
+            autosize=True
+        )
+        
+        return fig
+        
+    except Exception as e:
+        st.error(f"Error creating radar charts: {str(e)}")
         return None
 
 # ============================================================================
@@ -1594,6 +1788,21 @@ if 'portfolio_data' in st.session_state and not st.session_state.portfolio_data.
         st.caption("💡 Tip: Scroll horizontally to see all metrics. Ticker and Company columns remain frozen on the left.")
     else:
         st.info("No fundamental data available from MotherDuck for portfolio stocks.")
+
+# ============================================================================
+# PORTFOLIO RADAR CHARTS SECTION
+# ============================================================================
+st.markdown("---")
+st.subheader("📊 Portfolio Quality Radar Charts")
+
+with st.spinner("Loading radar charts from MotherDuck..."):
+    radar_fig = create_portfolio_radar_charts(tickers)
+    
+    if radar_fig is not None:
+        st.plotly_chart(radar_fig, use_container_width=True)
+        st.caption("💡 Color intensity indicates relative performance: Brightest green = highest composite score, Lighter teal = lowest composite score")
+    else:
+        st.info("No radar chart data available from MotherDuck for portfolio stocks.")
 
 # ============================================================================
 # GROK NEWS AGGREGATOR SECTION
