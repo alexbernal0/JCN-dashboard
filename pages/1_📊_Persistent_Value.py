@@ -11,6 +11,8 @@ import json
 import os
 import finnhub
 import requests
+import duckdb
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 # Page configuration
 st.set_page_config(
@@ -602,6 +604,157 @@ def create_portfolio_pie_charts(portfolio_df):
     )
     
     return fig
+
+# ============================================================================
+# MOTHERDUCK FUNDAMENTALS FUNCTIONS
+# ============================================================================
+
+def get_fundamentals_from_motherduck(tickers, portfolio_df):
+    """
+    Fetch fundamental metrics from MotherDuck database for portfolio stocks.
+    
+    Parameters:
+    -----------
+    tickers : list
+        List of ticker symbols
+    portfolio_df : pd.DataFrame
+        Portfolio DataFrame with Security (company name) column
+    
+    Returns:
+    --------
+    pd.DataFrame
+        Fundamentals scorecard with all metrics
+    """
+    try:
+        # Get MotherDuck token from environment
+        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
+        if not motherduck_token:
+            st.warning("MotherDuck token not configured. Fundamentals table unavailable.")
+            return None
+        
+        # Filter out empty tickers and prepare for SQL
+        valid_tickers = [t.strip().upper() for t in tickers if t and t.strip()]
+        if not valid_tickers:
+            return None
+        
+        symbols_str = "', '".join(valid_tickers)
+        
+        # Connect to MotherDuck
+        conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
+        
+        # Get GuruFocus data
+        try:
+            gf_data = conn.execute(f"""
+                SELECT * FROM my_db.main.gurufocus_with_momentum
+                WHERE symbol IN ('{symbols_str}')
+            """).df()
+        except Exception as e:
+            st.warning(f"Could not fetch GuruFocus data: {str(e)}")
+            gf_data = pd.DataFrame()
+        
+        # Get OBQ Scores data (most recent only)
+        try:
+            obq_data = conn.execute(f"""
+                SELECT * FROM my_db.main.OBQ_Scores
+                WHERE symbol IN ('{symbols_str}')
+                QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY calculation_date DESC) = 1
+            """).df()
+        except Exception as e:
+            st.warning(f"Could not fetch OBQ Scores data: {str(e)}")
+            obq_data = pd.DataFrame()
+        
+        conn.close()
+        
+        # If no data found, return None
+        if gf_data.empty and obq_data.empty:
+            return None
+        
+        # Merge datasets
+        if not gf_data.empty and not obq_data.empty:
+            merged = pd.merge(gf_data, obq_data, left_on='Symbol', right_on='symbol', how='left')
+        elif not gf_data.empty:
+            merged = gf_data
+        else:
+            merged = obq_data.rename(columns={'symbol': 'Symbol'})
+        
+        # Build scorecard
+        scorecard = pd.DataFrame()
+        scorecard['Ticker'] = merged['Symbol']
+        
+        # Add company names from portfolio
+        ticker_to_company = dict(zip(portfolio_df['Ticker'], portfolio_df['Security']))
+        scorecard['Company'] = scorecard['Ticker'].map(ticker_to_company)
+        
+        # Add fundamental metrics (with safe .get() to handle missing columns)
+        if '"3-Year Revenue Growth Rate (Per Share)" Rank' in merged.columns:
+            scorecard['3Y Rev Growth Rank'] = merged['"3-Year Revenue Growth Rate (Per Share)" Rank'].round(1)
+        
+        if '"3-Year EBITDA Growth Rate (Per Share)" Rank' in merged.columns:
+            scorecard['3Y EBITDA Growth Rank'] = merged['"3-Year EBITDA Growth Rate (Per Share)" Rank'].round(1)
+        
+        if '"3-Year FCF Growth Rate (Per Share)" Rank' in merged.columns:
+            scorecard['3Y FCF Growth Rank'] = merged['"3-Year FCF Growth Rate (Per Share)" Rank'].round(1)
+        
+        if 'Gross Margin %' in merged.columns:
+            scorecard['Gross Margin %'] = merged['Gross Margin %'].round(1)
+        
+        if 'Gross-Profit-to-Asset %' in merged.columns:
+            scorecard['Gross Profit to Asset'] = merged['Gross-Profit-to-Asset %'].round(1)
+        
+        if '"ROC (ROIC) %"' in merged.columns:
+            scorecard['ROIC %'] = merged['"ROC (ROIC) %"'].round(1)
+        
+        if '"ROC (ROIC) (5y Median)"' in merged.columns:
+            scorecard['ROIC 5y Median'] = merged['"ROC (ROIC) (5y Median)"'].round(1)
+        
+        if 'Years of Positive FCF over Past 10-Year' in merged.columns:
+            scorecard['Years Positive FCF'] = merged['Years of Positive FCF over Past 10-Year'].fillna(0).astype(int)
+        
+        if 'Years of Profitability over Past 10-Year' in merged.columns:
+            scorecard['Years Profitable'] = merged['Years of Profitability over Past 10-Year'].fillna(0).astype(int)
+        
+        if 'obq_composite_score' in merged.columns:
+            scorecard['OBQ Composite'] = merged['obq_composite_score'].round(1)
+        
+        if 'obq_growth_score' in merged.columns:
+            scorecard['OBQ Growth'] = merged['obq_growth_score'].round(1)
+        
+        if 'OBQ_Quality_Rank' in merged.columns:
+            scorecard['OBQ Quality'] = merged['OBQ_Quality_Rank'].round(1)
+        
+        if 'obq_momentum_score' in merged.columns:
+            scorecard['OBQ Momentum'] = merged['obq_momentum_score'].round(1)
+        
+        if 'obq_finstr_score' in merged.columns:
+            scorecard['OBQ FinStr'] = merged['obq_finstr_score'].round(1)
+        
+        if 'obq_value_score' in merged.columns:
+            scorecard['OBQ Value'] = merged['obq_value_score'].round(1)
+        
+        if 'GF Valuation' in merged.columns:
+            scorecard['GF Valuation'] = merged['GF Valuation']
+        
+        if 'obq_gqv' in merged.columns:
+            scorecard['OBQ GQV'] = merged['obq_gqv'].round(1)
+        
+        if 'obq_gqm' in merged.columns:
+            scorecard['OBQ GQM'] = merged['obq_gqm'].round(1)
+        
+        if 'obq_vqf' in merged.columns:
+            scorecard['OBQ VQF'] = merged['obq_vqf'].round(1)
+        
+        if 'obq_gm' in merged.columns:
+            scorecard['OBQ GM'] = merged['obq_gm'].round(1)
+        
+        # Keep input order
+        scorecard['order'] = scorecard['Ticker'].map({s: i for i, s in enumerate(valid_tickers)})
+        scorecard = scorecard.sort_values('order').drop('order', axis=1).reset_index(drop=True)
+        
+        return scorecard
+        
+    except Exception as e:
+        st.error(f"Error fetching fundamentals from MotherDuck: {str(e)}")
+        return None
 
 # ============================================================================
 # NEWS AGGREGATION FUNCTIONS
@@ -1333,6 +1486,57 @@ if tickers and len(tickers) > 0:
         st.error(f"An error occurred: {str(e)}")
 else:
     st.info("👇 Add stocks to your portfolio table below to begin analysis.")
+
+# ============================================================================
+# PORTFOLIO FUNDAMENTALS TABLE
+# ============================================================================
+
+if 'portfolio_data' in st.session_state and not st.session_state.portfolio_data.empty and tickers:
+    st.markdown("---")
+    st.subheader("📊 Portfolio Fundamentals")
+    
+    with st.spinner("Fetching fundamental metrics from MotherDuck..."):
+        fundamentals_df = get_fundamentals_from_motherduck(tickers, perf_df)
+    
+    if fundamentals_df is not None and not fundamentals_df.empty:
+        # Configure AG Grid with frozen columns
+        gb = GridOptionsBuilder.from_dataframe(fundamentals_df)
+        
+        # Pin Ticker and Company columns to the left (frozen)
+        gb.configure_column("Ticker", pinned='left', width=80, suppressSizeToFit=True)
+        gb.configure_column("Company", pinned='left', width=200, suppressSizeToFit=True)
+        
+        # Configure other columns
+        for col in fundamentals_df.columns:
+            if col not in ['Ticker', 'Company']:
+                gb.configure_column(col, width=120)
+        
+        # Enable sorting and filtering
+        gb.configure_default_column(sortable=True, filterable=False, resizable=True)
+        
+        # Grid options
+        gb.configure_grid_options(
+            domLayout='normal',
+            enableRangeSelection=True,
+            suppressHorizontalScroll=False
+        )
+        
+        gridOptions = gb.build()
+        
+        # Display AG Grid
+        AgGrid(
+            fundamentals_df,
+            gridOptions=gridOptions,
+            height=600,
+            fit_columns_on_grid_load=False,
+            theme='streamlit',
+            update_mode=GridUpdateMode.NO_UPDATE,
+            allow_unsafe_jscode=False
+        )
+        
+        st.caption("💡 Tip: Scroll horizontally to see all metrics. Ticker and Company columns remain frozen on the left.")
+    else:
+        st.info("No fundamental data available from MotherDuck for portfolio stocks.")
 
 # ============================================================================
 # GROK NEWS AGGREGATOR SECTION
