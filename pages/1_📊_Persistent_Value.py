@@ -1131,11 +1131,18 @@ def create_portfolio_trends_charts(tickers):
         symbols_with_data = price_data['Symbol'].unique().tolist()
         symbols = [s for s in valid_tickers if s in symbols_with_data]
         
+        # Debug logging
+        st.write(f"DEBUG: valid_tickers = {valid_tickers}")
+        st.write(f"DEBUG: symbols_with_data = {symbols_with_data}")
+        st.write(f"DEBUG: symbols to plot = {symbols}")
+        
         if not symbols:
+            st.error("No symbols with data found!")
             return None
         
         # Sort symbols alphabetically for consistent display
         symbols = sorted(symbols)
+        st.write(f"DEBUG: After sorting = {symbols}")
         
         # Calculate grid dimensions (3 columns, 2 rows per stock)
         n_stocks = len(symbols)
@@ -2251,6 +2258,9 @@ with col2:
 
 # Display charts
 if tickers:
+    # Debug: Show which tickers are being processed
+    st.caption(f"📊 Generating charts for {len(tickers)} stocks: {', '.join(sorted(tickers)[:10])}{'...' if len(tickers) > 10 else ''}")
+    
     with st.spinner("Loading trend charts from MotherDuck..."):
         trends_fig = create_portfolio_trends_charts(tickers)
         
