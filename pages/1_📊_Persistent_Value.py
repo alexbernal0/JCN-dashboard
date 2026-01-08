@@ -2227,8 +2227,7 @@ if 'portfolio_data' in st.session_state and not st.session_state.portfolio_data.
             if aggregated_df is not None and not aggregated_df.empty:
                 st.dataframe(
                     aggregated_df,
-                    use_container_width=True,
-                    height=None  # Auto height to show all rows without scrolling
+                    use_container_width=True
                 )
                 st.caption("💡 Shows Max, Median, Average, and Min values across all portfolio stocks for each fundamental metric.")
             else:
