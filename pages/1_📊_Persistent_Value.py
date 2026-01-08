@@ -1159,7 +1159,7 @@ def create_portfolio_trends_charts(tickers):
             rows=total_rows,
             cols=n_cols,
             row_heights=row_heights,
-            vertical_spacing=0.02,
+            vertical_spacing=0.08,  # Increased from 0.02 to prevent overlap
             horizontal_spacing=0.08,
             specs=specs
         )
@@ -1308,7 +1308,7 @@ def create_portfolio_trends_charts(tickers):
             
             # Add annotation for stock name and metrics above candlestick chart
             fig.add_annotation(
-                text=f"<b>{symbol}</b><br>" +
+                text=f"<b><span style='font-size:16px; color:black'>{symbol}</span></b><br>" +
                      f"<span style='font-size:9px'>SystemScore: {system_score:.4f} | R²: {r_squared:.4f} | CAGR: {cagr:.2%}<br>" +
                      f"Avg Annual Range: {avg_annual_range:.1f}% | Current DD: {current_drawdown:.1f}%</span>",
                 xref="x domain",
