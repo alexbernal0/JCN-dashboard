@@ -2149,7 +2149,7 @@ else:
 # PORTFOLIO FUNDAMENTALS TABLE
 # ============================================================================
 
-if 'portfolio_data' in st.session_state and not st.session_state.portfolio_data.empty and tickers:
+if 'portfolio_data' in st.session_state and not st.session_state.portfolio_data.empty and tickers and perf_df is not None:
     st.markdown("---")
     st.subheader("📊 Portfolio Fundamentals")
     
