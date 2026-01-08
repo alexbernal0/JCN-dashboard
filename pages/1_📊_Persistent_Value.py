@@ -1159,7 +1159,7 @@ def create_portfolio_trends_charts(tickers):
             rows=total_rows,
             cols=n_cols,
             row_heights=row_heights,
-            vertical_spacing=0.08,  # Increased from 0.02 to prevent overlap
+            vertical_spacing=0.06,  # Increased from 0.02 to prevent overlap (max ~0.077 for 14 rows)
             horizontal_spacing=0.08,
             specs=specs
         )
