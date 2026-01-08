@@ -1306,18 +1306,22 @@ def create_portfolio_trends_charts(tickers):
                 row=drawdown_row, col=col
             )
             
-            # Add annotation for stock name and metrics above candlestick chart
+            # Add legend box at top-left with ticker and metrics (black text)
             fig.add_annotation(
-                text=f"<b><span style='font-size:16px; color:black'>{symbol}</span></b><br>" +
-                     f"<span style='font-size:9px'>SystemScore: {system_score:.4f} | R²: {r_squared:.4f} | CAGR: {cagr:.2%}<br>" +
+                text=f"<b><span style='font-size:14px; color:black'>{symbol}</span></b><br>" +
+                     f"<span style='font-size:9px; color:black'>SystemScore: {system_score:.4f} | R²: {r_squared:.4f} | CAGR: {cagr:.2%}<br>" +
                      f"Avg Annual Range: {avg_annual_range:.1f}% | Current DD: {current_drawdown:.1f}%</span>",
                 xref="x domain",
                 yref="y domain",
-                x=0.5,
-                y=1.15,
+                x=0.02,  # Top-left position
+                y=0.98,  # Top-left position
                 showarrow=False,
-                xanchor='center',
-                yanchor='bottom',
+                xanchor='left',
+                yanchor='top',
+                bgcolor='rgba(255, 255, 255, 0.8)',  # White background with slight transparency
+                bordercolor='black',
+                borderwidth=1,
+                borderpad=4,
                 row=candlestick_row,
                 col=col
             )
