@@ -1159,7 +1159,7 @@ def create_portfolio_trends_charts(tickers):
             rows=total_rows,
             cols=n_cols,
             row_heights=row_heights,
-            vertical_spacing=0.06,  # Increased from 0.02 to prevent overlap (max ~0.077 for 14 rows)
+            vertical_spacing=0.01,  # Minimal spacing so charts touch
             horizontal_spacing=0.08,
             specs=specs
         )
@@ -1332,7 +1332,7 @@ def create_portfolio_trends_charts(tickers):
         
         # Update layout
         fig.update_layout(
-            height=350 * n_stock_rows,  # 350px per stock row (candlestick + drawdown)
+            height=500 * n_stock_rows,  # Increased from 350px to 500px per stock row for larger charts
             showlegend=False,
             paper_bgcolor='white',
             plot_bgcolor='white',
