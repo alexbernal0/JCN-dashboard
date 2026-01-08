@@ -1147,12 +1147,12 @@ def create_portfolio_trends_charts(tickers):
         specs = []
         row_heights = []
         for stock_row in range(n_stock_rows):
-            # Candlestick row
+            # Candlestick row (larger to show more data)
             specs.append([{}] * n_cols)
-            row_heights.append(0.7)
-            # Drawdown row
+            row_heights.append(0.85)
+            # Drawdown row (smaller, just for reference)
             specs.append([{}] * n_cols)
-            row_heights.append(0.3)
+            row_heights.append(0.15)
         
         # Create subplots
         fig = make_subplots(
