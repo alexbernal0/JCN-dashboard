@@ -611,6 +611,62 @@ def create_portfolio_pie_charts(portfolio_df):
 # MOTHERDUCK FUNDAMENTALS FUNCTIONS
 # ============================================================================
 
+def get_portfolio_aggregated_metrics(fundamentals_df):
+    """
+    Calculate Max, Median, Average, and Min for all fundamental metrics.
+    
+    Args:
+        fundamentals_df: DataFrame from get_fundamentals_from_motherduck
+        
+    Returns:
+        DataFrame with rows = Max/Median/Avg/Min, columns = metrics
+    """
+    try:
+        if fundamentals_df is None or fundamentals_df.empty:
+            return None
+        
+        # Get all numeric columns (exclude Ticker, Company, and GF_Valuation)
+        exclude_cols = ['Ticker', 'Company', 'GF Valuation']
+        numeric_columns = [col for col in fundamentals_df.columns if col not in exclude_cols]
+        
+        # Calculate statistics for each column
+        composite_data = []
+        
+        for col in numeric_columns:
+            # Get non-null values (exclude 'N/A' strings)
+            values = fundamentals_df[col].copy()
+            
+            # Convert to numeric, coercing 'N/A' to NaN
+            values = pd.to_numeric(values, errors='coerce')
+            values = values.dropna()
+            
+            if len(values) > 0:
+                composite_data.append({
+                    'Metric': col,
+                    'Max': values.max(),
+                    'Median': values.median(),
+                    'Average': values.mean(),
+                    'Min': values.min()
+                })
+        
+        # Create composite DataFrame
+        composite = pd.DataFrame(composite_data)
+        
+        # Round all numeric columns to 1 decimal place
+        composite['Max'] = composite['Max'].round(1)
+        composite['Median'] = composite['Median'].round(1)
+        composite['Average'] = composite['Average'].round(1)
+        composite['Min'] = composite['Min'].round(1)
+        
+        # Transpose: Rows = Max/Median/Avg/Min, Columns = Metrics
+        composite = composite.set_index('Metric').T
+        
+        return composite
+        
+    except Exception as e:
+        st.error(f"Error calculating aggregated metrics: {str(e)}")
+        return None
+
 def get_fundamentals_from_motherduck(tickers, portfolio_df):
     """
     Fetch fundamental metrics from MotherDuck database for portfolio stocks.
@@ -2158,6 +2214,25 @@ if 'portfolio_data' in st.session_state and not st.session_state.portfolio_data.
         )
         
         st.caption("💡 Tip: Scroll horizontally to see all metrics. Ticker and Company columns remain frozen on the left.")
+        
+        # ============================================================================
+        # PORTFOLIO AGGREGATED METRICS SECTION
+        # ============================================================================
+        st.markdown("---")
+        st.subheader("📊 Portfolio Aggregated Metrics")
+        
+        with st.spinner("Calculating portfolio aggregates..."):
+            aggregated_df = get_portfolio_aggregated_metrics(fundamentals_df)
+            
+            if aggregated_df is not None and not aggregated_df.empty:
+                st.dataframe(
+                    aggregated_df,
+                    use_container_width=True,
+                    height=None  # Auto height to show all rows without scrolling
+                )
+                st.caption("💡 Shows Max, Median, Average, and Min values across all portfolio stocks for each fundamental metric.")
+            else:
+                st.info("No aggregated metrics available.")
     else:
         st.info("No fundamental data available from MotherDuck for portfolio stocks.")
 
