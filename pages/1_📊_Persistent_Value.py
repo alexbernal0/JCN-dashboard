@@ -1103,7 +1103,8 @@ def fetch_weekly_data(conn, symbols, years=8):
 
 def create_portfolio_trends_charts(tickers):
     """
-    Create Plotly candlestick charts with regression and drawdown for portfolio stocks.
+    Create Plotly candlestick charts with regression and drawdown subplots for portfolio stocks.
+    Each stock gets 2 rows: candlestick chart on top, drawdown chart below.
     """
     try:
         motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
@@ -1133,24 +1134,44 @@ def create_portfolio_trends_charts(tickers):
         if not symbols:
             return None
         
-        # Calculate grid dimensions (3 columns)
+        # Sort symbols alphabetically for consistent display
+        symbols = sorted(symbols)
+        
+        # Calculate grid dimensions (3 columns, 2 rows per stock)
         n_stocks = len(symbols)
         n_cols = 3
-        n_rows = math.ceil(n_stocks / n_cols)
+        n_stock_rows = math.ceil(n_stocks / n_cols)
+        total_rows = n_stock_rows * 2  # Each stock row becomes 2 subplot rows
         
-        # Create subplots with secondary y-axis for drawdown
+        # Create specs and row heights
+        specs = []
+        row_heights = []
+        for stock_row in range(n_stock_rows):
+            # Candlestick row
+            specs.append([{}] * n_cols)
+            row_heights.append(0.7)
+            # Drawdown row
+            specs.append([{}] * n_cols)
+            row_heights.append(0.3)
+        
+        # Create subplots
         fig = make_subplots(
-            rows=n_rows,
+            rows=total_rows,
             cols=n_cols,
-            subplot_titles=[f"<b>{sym}</b>" for sym in symbols],
-            vertical_spacing=0.12,
+            row_heights=row_heights,
+            vertical_spacing=0.02,
             horizontal_spacing=0.08,
-            specs=[[{"secondary_y": True}] * n_cols for _ in range(n_rows)]
+            specs=specs
         )
         
         for idx, symbol in enumerate(symbols):
-            row = (idx // n_cols) + 1
+            # Calculate which column this stock is in
             col = (idx % n_cols) + 1
+            # Calculate which stock row this is (0-indexed)
+            stock_row = idx // n_cols
+            # Calculate actual subplot rows (each stock row = 2 subplot rows)
+            candlestick_row = stock_row * 2 + 1
+            drawdown_row = stock_row * 2 + 2
             
             stock_data = price_data[price_data['Symbol'] == symbol].copy()
             stock_data = stock_data.sort_values('Date').reset_index(drop=True)
@@ -1195,6 +1216,12 @@ def create_portfolio_trends_charts(tickers):
             # Dates for regression plot
             reg_dates = stock_data['Date'].iloc[regression_start_idx:].values
             
+            # Calculate drawdown
+            cummax = stock_data['Close'].cummax()
+            drawdown = ((stock_data['Close'] - cummax) / cummax) * 100
+            current_drawdown = drawdown.iloc[-1]
+            median_dd = drawdown.median()
+            
             # Add candlestick chart
             fig.add_trace(
                 go.Candlestick(
@@ -1208,7 +1235,7 @@ def create_portfolio_trends_charts(tickers):
                     increasing_line_color='#2E7D32',
                     decreasing_line_color='#C62828'
                 ),
-                row=row, col=col, secondary_y=False
+                row=candlestick_row, col=col
             )
             
             # Add regression line
@@ -1221,7 +1248,7 @@ def create_portfolio_trends_charts(tickers):
                     name='Regression',
                     showlegend=False
                 ),
-                row=row, col=col, secondary_y=False
+                row=candlestick_row, col=col
             )
             
             # Add confidence bands (1, 2, 3 std errors)
@@ -1235,7 +1262,7 @@ def create_portfolio_trends_charts(tickers):
                         showlegend=False,
                         hoverinfo='skip'
                     ),
-                    row=row, col=col, secondary_y=False
+                    row=candlestick_row, col=col
                 )
                 fig.add_trace(
                     go.Scatter(
@@ -1248,16 +1275,10 @@ def create_portfolio_trends_charts(tickers):
                         showlegend=False,
                         hoverinfo='skip'
                     ),
-                    row=row, col=col, secondary_y=False
+                    row=candlestick_row, col=col
                 )
             
-            # Calculate drawdown
-            cummax = stock_data['Close'].cummax()
-            drawdown = ((stock_data['Close'] - cummax) / cummax) * 100
-            current_drawdown = drawdown.iloc[-1]
-            median_dd = drawdown.median()
-            
-            # Add drawdown on secondary y-axis
+            # Add drawdown chart (separate subplot below)
             fig.add_trace(
                 go.Scatter(
                     x=stock_data['Date'],
@@ -1267,10 +1288,9 @@ def create_portfolio_trends_charts(tickers):
                     fill='tozeroy',
                     fillcolor='rgba(200, 0, 0, 0.2)',
                     name='Drawdown',
-                    showlegend=False,
-                    yaxis='y2'
+                    showlegend=False
                 ),
-                row=row, col=col, secondary_y=True
+                row=drawdown_row, col=col
             )
             
             # Add median drawdown line
@@ -1281,27 +1301,38 @@ def create_portfolio_trends_charts(tickers):
                     mode='lines',
                     line=dict(color='gray', width=1, dash='dash'),
                     name='Median DD',
-                    showlegend=False,
-                    yaxis='y2'
+                    showlegend=False
                 ),
-                row=row, col=col, secondary_y=True
+                row=drawdown_row, col=col
             )
             
-            # Update subplot title with metrics
-            fig.layout.annotations[idx].update(
+            # Add annotation for stock name and metrics above candlestick chart
+            fig.add_annotation(
                 text=f"<b>{symbol}</b><br>" +
                      f"<span style='font-size:9px'>SystemScore: {system_score:.4f} | R²: {r_squared:.4f} | CAGR: {cagr:.2%}<br>" +
-                     f"Avg Annual Range: {avg_annual_range:.1f}% | Current DD: {current_drawdown:.1f}%</span>"
+                     f"Avg Annual Range: {avg_annual_range:.1f}% | Current DD: {current_drawdown:.1f}%</span>",
+                xref="x domain",
+                yref="y domain",
+                x=0.5,
+                y=1.15,
+                showarrow=False,
+                xanchor='center',
+                yanchor='bottom',
+                row=candlestick_row,
+                col=col
             )
             
-            # Update y-axes
-            fig.update_yaxes(title_text="Price ($)", row=row, col=col, secondary_y=False)
-            fig.update_yaxes(title_text="DD %", row=row, col=col, secondary_y=True, 
+            # Update y-axes labels
+            fig.update_yaxes(title_text="Price ($)", row=candlestick_row, col=col)
+            fig.update_yaxes(title_text="DD %", row=drawdown_row, col=col, 
                            range=[drawdown.min() * 1.1, 5])
+            
+            # Hide x-axis labels for candlestick charts (only show on drawdown)
+            fig.update_xaxes(showticklabels=False, row=candlestick_row, col=col)
         
         # Update layout
         fig.update_layout(
-            height=500 * n_rows,
+            height=350 * n_stock_rows,  # 350px per stock row (candlestick + drawdown)
             showlegend=False,
             paper_bgcolor='white',
             plot_bgcolor='white',
@@ -1316,6 +1347,8 @@ def create_portfolio_trends_charts(tickers):
         
     except Exception as e:
         st.error(f"Error creating trend charts: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
         return None
 
 # ============================================================================
