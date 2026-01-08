@@ -1822,6 +1822,9 @@ if 'last_refresh' in st.session_state:
 # Try to load from cache first
 cached_portfolio_data, cached_time = load_from_cache()
 
+# Initialize perf_df to avoid NameError
+perf_df = None
+
 # Main content area - Portfolio Performance Details
 if tickers and len(tickers) > 0:
     try:
