@@ -204,6 +204,152 @@ def get_per_share_data(ticker):
         st.error(f"Error fetching per share data: {str(e)}")
         return None
 
+def get_quality_metrics(ticker):
+    """Get 10-year fiscal year quality metrics and ratios from MotherDuck"""
+    try:
+        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        
+        # Fetch income statement data
+        df_income = conn.execute(f"""
+            SELECT symbol, date, total_revenue, gross_profit, operating_income, net_income, ebitda,
+                   cost_of_revenue, research_and_development, selling_general_and_administrative
+            FROM my_db.main.pwb_stocksincomestatement
+            WHERE symbol = '{ticker.upper()}'
+            ORDER BY date DESC
+            LIMIT 50
+        """).df()
+        
+        # Fetch balance sheet data
+        df_balance = conn.execute(f"""
+            SELECT symbol, date, total_assets, total_liabilities, total_shareholder_equity,
+                   short_long_term_debt_total, total_current_assets, total_current_liabilities,
+                   cash_and_cash_equivalents_at_carrying_value, inventory,
+                   common_stock_shares_outstanding
+            FROM my_db.main.pwb_stocksbalancesheet
+            WHERE symbol = '{ticker.upper()}'
+            ORDER BY date DESC
+            LIMIT 50
+        """).df()
+        
+        # Fetch cashflow data
+        df_cashflow = conn.execute(f"""
+            SELECT symbol, date, operating_cashflow, capital_expenditures
+            FROM my_db.main.pwb_stockscashflow
+            WHERE symbol = '{ticker.upper()}'
+            ORDER BY date DESC
+            LIMIT 50
+        """).df()
+        
+        conn.close()
+        
+        if df_income.empty:
+            return None
+        
+        # Convert dates
+        df_income['date'] = pd.to_datetime(df_income['date'])
+        df_balance['date'] = pd.to_datetime(df_balance['date'])
+        df_cashflow['date'] = pd.to_datetime(df_cashflow['date'])
+        
+        # Identify fiscal year-end
+        df_income['month_day'] = df_income['date'].dt.strftime('%m-%d')
+        fiscal_year_end = df_income['month_day'].mode()[0]
+        
+        # Filter to fiscal year-ends
+        df_income_fy = df_income[df_income['month_day'] == fiscal_year_end].head(10).copy()
+        df_balance_fy = df_balance[df_balance['date'].dt.strftime('%m-%d') == fiscal_year_end].head(10).copy()
+        df_cashflow_fy = df_cashflow[df_cashflow['date'].dt.strftime('%m-%d') == fiscal_year_end].head(10).copy()
+        
+        # Merge all data
+        df_merged = df_income_fy.copy()
+        
+        df_merged = df_merged.merge(
+            df_balance_fy[['date', 'total_assets', 'total_liabilities', 'total_shareholder_equity',
+                           'short_long_term_debt_total', 'total_current_assets', 'total_current_liabilities',
+                           'cash_and_cash_equivalents_at_carrying_value', 'inventory']],
+            on='date', how='left'
+        )
+        
+        df_merged = df_merged.merge(
+            df_cashflow_fy[['date', 'operating_cashflow', 'capital_expenditures']],
+            on='date', how='left'
+        )
+        
+        # Calculate Free Cash Flow
+        df_merged['free_cash_flow'] = df_merged['operating_cashflow'] + df_merged['capital_expenditures']
+        
+        # Calculate all ratios
+        df_merged['Net Income'] = df_merged['net_income']
+        df_merged['Gross Margin %'] = (df_merged['gross_profit'] / df_merged['total_revenue'] * 100).fillna(0)
+        df_merged['Operating Margin %'] = (df_merged['operating_income'] / df_merged['total_revenue'] * 100).fillna(0)
+        df_merged['Net Margin %'] = (df_merged['net_income'] / df_merged['total_revenue'] * 100).fillna(0)
+        df_merged['EBITA Margin %'] = (df_merged['ebitda'] / df_merged['total_revenue'] * 100).fillna(0)
+        df_merged['FCF Margin %'] = (df_merged['free_cash_flow'] / df_merged['total_revenue'] * 100).fillna(0)
+        
+        # Return ratios
+        df_merged['ROIC %'] = (df_merged['net_income'] / (df_merged['total_shareholder_equity'] + df_merged['short_long_term_debt_total']) * 100).fillna(0)
+        df_merged['ROC %'] = (df_merged['ebitda'] / (df_merged['total_shareholder_equity'] + df_merged['short_long_term_debt_total']) * 100).fillna(0)
+        df_merged['ROCE %'] = (df_merged['operating_income'] / (df_merged['total_assets'] - df_merged['total_current_liabilities']) * 100).fillna(0)
+        df_merged['ROE %'] = (df_merged['net_income'] / df_merged['total_shareholder_equity'] * 100).fillna(0)
+        df_merged['ROA %'] = (df_merged['net_income'] / df_merged['total_assets'] * 100).fillna(0)
+        
+        # Leverage ratios
+        df_merged['Debt to Equity'] = (df_merged['short_long_term_debt_total'] / df_merged['total_shareholder_equity']).fillna(0)
+        df_merged['Debt to Asset'] = (df_merged['short_long_term_debt_total'] / df_merged['total_assets']).fillna(0)
+        df_merged['Gross Profit to Asset'] = (df_merged['gross_profit'] / df_merged['total_assets']).fillna(0)
+        
+        # Turnover ratios
+        df_merged['Asset Turnover'] = (df_merged['total_revenue'] / df_merged['total_assets']).fillna(0)
+        df_merged['Cash Conversion Cycle'] = 0  # Requires more detailed data (DSO + DIO - DPO)
+        df_merged['COGS to Revenue'] = (df_merged['cost_of_revenue'] / df_merged['total_revenue'] * 100).fillna(0)
+        df_merged['Inventory to Revenue'] = (df_merged['inventory'] / df_merged['total_revenue'] * 100).fillna(0)
+        df_merged['CAPEX to Revenue'] = (-df_merged['capital_expenditures'] / df_merged['total_revenue'] * 100).fillna(0)
+        
+        # Liquidity ratios
+        df_merged['Current Ratio'] = (df_merged['total_current_assets'] / df_merged['total_current_liabilities']).fillna(0)
+        df_merged['Quick Ratio'] = ((df_merged['total_current_assets'] - df_merged['inventory']) / df_merged['total_current_liabilities']).fillna(0)
+        df_merged['Cash Ratio'] = (df_merged['cash_and_cash_equivalents_at_carrying_value'] / df_merged['total_current_liabilities']).fillna(0)
+        
+        # Create year column
+        df_merged['Year'] = df_merged['date'].dt.year
+        
+        # Select metrics
+        metrics = [
+            'Net Income',
+            'Gross Margin %',
+            'Operating Margin %',
+            'Net Margin %',
+            'EBITA Margin %',
+            'FCF Margin %',
+            'ROIC %',
+            'ROC %',
+            'ROCE %',
+            'ROE %',
+            'ROA %',
+            'Debt to Equity',
+            'Debt to Asset',
+            'Gross Profit to Asset',
+            'Asset Turnover',
+            'Cash Conversion Cycle',
+            'COGS to Revenue',
+            'Inventory to Revenue',
+            'CAPEX to Revenue',
+            'Current Ratio',
+            'Quick Ratio',
+            'Cash Ratio'
+        ]
+        
+        # Pivot: Years as columns, metrics as rows
+        df_pivot = df_merged.set_index('Year')[metrics].T
+        df_pivot = df_pivot[sorted(df_pivot.columns, reverse=True)]
+        df_pivot = df_pivot.reset_index()
+        df_pivot = df_pivot.rename(columns={'index': 'Metric'})
+        
+        return df_pivot
+        
+    except Exception as e:
+        st.error(f"Error fetching quality metrics: {str(e)}")
+        return None
+
 # Header with logo and title
 col1, col2 = st.columns([1, 4])
 with col1:
@@ -298,6 +444,34 @@ if current_ticker:
             st.caption("💡 Data sourced from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow, PWB_Allstocks_weekly")
         else:
             st.warning(f"⚠️ No fiscal year data available for {current_ticker}")
+        
+        st.markdown("---")
+        
+        # Quality Metrics Section
+        st.subheader("🎯 Quality Metrics")
+        
+        with st.spinner("Loading 10-year quality metrics..."):
+            quality_df = get_quality_metrics(current_ticker)
+        
+        if quality_df is not None and not quality_df.empty:
+            # Format the dataframe for display
+            display_df_quality = quality_df.copy()
+            
+            # Format numeric columns to 2 decimal places
+            for col in display_df_quality.columns:
+                if col != 'Metric':
+                    display_df_quality[col] = display_df_quality[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+            
+            # Display the table
+            st.dataframe(
+                display_df_quality,
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            st.caption("💡 Data sourced from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow")
+        else:
+            st.warning(f"⚠️ No quality metrics data available for {current_ticker}")
         
         st.markdown("---")
         
