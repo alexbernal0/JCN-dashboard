@@ -86,6 +86,40 @@ def load_from_cache():
         st.warning(f"Could not load cache: {str(e)}")
         return None, None
 
+def save_to_csv_snapshot(data, portfolio_name="persistent_value"):
+    """Save portfolio data to CSV snapshot for fallback"""
+    try:
+        df = pd.DataFrame(data)
+        csv_path = f"cache_snapshots/{portfolio_name}_snapshot.csv"
+        df.to_csv(csv_path, index=False)
+        # Also save timestamp
+        timestamp_path = f"cache_snapshots/{portfolio_name}_timestamp.txt"
+        with open(timestamp_path, 'w') as f:
+            f.write(datetime.now().isoformat())
+    except Exception as e:
+        pass  # Silent fail for CSV snapshot
+
+def load_from_csv_snapshot(portfolio_name="persistent_value"):
+    """Load portfolio data from CSV snapshot as fallback"""
+    try:
+        csv_path = f"cache_snapshots/{portfolio_name}_snapshot.csv"
+        if os.path.exists(csv_path):
+            df = pd.DataFrame(pd.read_csv(csv_path))
+            data = df.to_dict('records')
+            
+            # Load timestamp if available
+            timestamp_path = f"cache_snapshots/{portfolio_name}_timestamp.txt"
+            if os.path.exists(timestamp_path):
+                with open(timestamp_path, 'r') as f:
+                    timestamp = datetime.fromisoformat(f.read().strip())
+            else:
+                timestamp = datetime.now()
+            
+            return data, timestamp
+        return None, None
+    except Exception as e:
+        return None, None
+
 # Header with logo and title
 col1, col2, col3 = st.columns([1, 4, 2])
 with col1:
@@ -1879,6 +1913,7 @@ if tickers and len(tickers) > 0:
                 # If fetch was successful, save to cache
                 if fetch_success and portfolio_data:
                     save_to_cache(portfolio_data, datetime.now())
+                    save_to_csv_snapshot(portfolio_data, "persistent_value")  # Save CSV snapshot
                     st.session_state.last_refresh = datetime.now()
                     st.success("✅ Fresh data loaded successfully!")
                 elif not fetch_success and cached_portfolio_data:
@@ -1886,13 +1921,27 @@ if tickers and len(tickers) > 0:
                     portfolio_data = cached_portfolio_data
                     st.warning("⚠️ Rate limit reached. Loading from cache...")
                 elif not fetch_success:
-                    st.error("❌ Could not fetch data and no cache available. Please try again later.")
-                    portfolio_data = []
+                    # Try CSV snapshot as last resort
+                    csv_data, csv_time = load_from_csv_snapshot("persistent_value")
+                    if csv_data:
+                        portfolio_data = csv_data
+                        st.warning(f"💾 Loading from snapshot ({csv_time.strftime('%Y-%m-%d %I:%M %p')})")
+                    else:
+                        st.error("❌ Could not fetch data and no cache available. Please try again later.")
+                        portfolio_data = []
         else:
             # Load from cache
             if cached_portfolio_data:
                 portfolio_data = cached_portfolio_data
                 st.info("📦 Loading from cache (click Refresh Data for latest prices)")
+            else:
+                # Try CSV snapshot as fallback
+                csv_data, csv_time = load_from_csv_snapshot("persistent_value")
+                if csv_data:
+                    portfolio_data = csv_data
+                    st.info(f"💾 Loading from snapshot ({csv_time.strftime('%Y-%m-%d %I:%M %p')})")
+                else:
+                    portfolio_data = []
         
         if portfolio_data:
             # Create DataFrame
