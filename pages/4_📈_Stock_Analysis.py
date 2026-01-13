@@ -652,8 +652,10 @@ if current_ticker:
             all_rows = []
             
             for parent_name, parent_info in hierarchy.items():
-                # Add parent row
-                parent_row = {'Metric': parent_name, 'is_parent': True, 'parent_name': parent_name}
+                # Add parent row with inline arrow
+                is_expanded = parent_name in st.session_state.expanded_parents
+                arrow = "▼" if is_expanded else "▶"
+                parent_row = {'Metric': f"{arrow} {parent_name}", 'is_parent': True, 'parent_name': parent_name}
                 for year in years:
                     value = parent_info['data'].get(year, np.nan)
                     if pd.notna(value):
@@ -690,21 +692,21 @@ if current_ticker:
                                 child_row[year] = "N/A"
                         all_rows.append(child_row)
             
-            # Create buttons for each parent to toggle expansion
-            st.markdown("**Click on a row to expand/collapse details:**")
-            button_cols = st.columns(len(hierarchy))
-            for idx, parent_name in enumerate(hierarchy.keys()):
+            # Create compact toggle buttons
+            parent_names = list(hierarchy.keys())
+            button_cols = st.columns(len(parent_names))
+            
+            for idx, parent_name in enumerate(parent_names):
                 with button_cols[idx]:
                     is_expanded = parent_name in st.session_state.expanded_parents
-                    button_label = f"▼ {parent_name}" if is_expanded else f"▶ {parent_name}"
-                    if st.button(button_label, key=f"toggle_{parent_name}", use_container_width=True):
+                    arrow = "▼" if is_expanded else "▶"
+                    # Compact button with just arrow
+                    if st.button(f"{arrow}", key=f"toggle_{parent_name}", help=parent_name):
                         if parent_name in st.session_state.expanded_parents:
                             st.session_state.expanded_parents.remove(parent_name)
                         else:
                             st.session_state.expanded_parents.add(parent_name)
                         st.rerun()
-            
-            st.markdown("")
             
             # Create and display unified dataframe
             df_income_display = pd.DataFrame(all_rows)
