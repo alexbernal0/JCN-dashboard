@@ -314,7 +314,6 @@ def get_quality_metrics(ticker):
         
         # Select metrics
         metrics = [
-            'Net Income',
             'Gross Margin %',
             'Operating Margin %',
             'Net Margin %',
