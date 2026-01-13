@@ -360,7 +360,7 @@ def get_income_statement(ticker):
                    operating_expenses, research_and_development, 
                    selling_general_and_administrative,
                    operating_income, interest_expense, interest_income,
-                   other_non_operating_income_expenses, income_before_tax,
+                   other_non_operating_income, income_before_tax,
                    income_tax_expense, net_income, ebitda
             FROM my_db.main.pwb_stocksincomestatement
             WHERE symbol = '{ticker}'
@@ -450,7 +450,7 @@ def get_income_statement(ticker):
             ('Operating Margin %', 'operating_margin', False, 'Operating Income'),
             ('Interest Expense', 'interest_expense', False, 'Operating Income'),
             ('Interest Income', 'interest_income', False, 'Operating Income'),
-            ('Other Expenses', 'other_non_operating_income_expenses', False, 'Operating Income'),
+            ('Other Expenses', 'other_non_operating_income', False, 'Operating Income'),
             ('Income Before Tax', 'income_before_tax', False, 'Operating Income'),
             ('Income Tax', 'income_tax_expense', False, 'Operating Income'),
             
