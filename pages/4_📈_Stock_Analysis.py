@@ -644,32 +644,35 @@ if current_ticker:
             hierarchy = income_data['hierarchy']
             years = income_data['years']
             
-            # Create a container for the income statement
+            # Initialize session state for expanded parents
+            if 'expanded_parents' not in st.session_state:
+                st.session_state.expanded_parents = set()
+            
+            # Build all rows for the unified table
+            all_rows = []
+            
             for parent_name, parent_info in hierarchy.items():
-                # Create expander for each parent item
-                with st.expander(f"**{parent_name}**", expanded=False):
-                    # Display parent row with years
-                    parent_row = {'Metric': parent_name}
-                    for year in years:
-                        value = parent_info['data'].get(year, np.nan)
-                        if pd.notna(value):
-                            if 'Margin' in parent_name or 'EPS' in parent_name:
-                                parent_row[year] = f"{value:.2f}"
-                            elif abs(value) >= 1e9:
-                                parent_row[year] = f"{value/1e9:.2f}B"
-                            elif abs(value) >= 1e6:
-                                parent_row[year] = f"{value/1e6:.2f}M"
-                            else:
-                                parent_row[year] = f"{value:.2f}"
+                # Add parent row
+                parent_row = {'Metric': parent_name, 'is_parent': True, 'parent_name': parent_name}
+                for year in years:
+                    value = parent_info['data'].get(year, np.nan)
+                    if pd.notna(value):
+                        if 'Margin' in parent_name or 'EPS' in parent_name:
+                            parent_row[year] = f"{value:.2f}"
+                        elif abs(value) >= 1e9:
+                            parent_row[year] = f"{value/1e9:.2f}B"
+                        elif abs(value) >= 1e6:
+                            parent_row[year] = f"{value/1e6:.2f}M"
                         else:
-                            parent_row[year] = "N/A"
-                    
-                    # Create dataframe for parent + children
-                    rows = [parent_row]
-                    
-                    # Add children rows
+                            parent_row[year] = f"{value:.2f}"
+                    else:
+                        parent_row[year] = "N/A"
+                all_rows.append(parent_row)
+                
+                # Add children rows if parent is expanded
+                if parent_name in st.session_state.expanded_parents:
                     for child in parent_info['children']:
-                        child_row = {'Metric': f"  {child['name']}"}
+                        child_row = {'Metric': f"    {child['name']}", 'is_parent': False, 'parent_name': parent_name}
                         for year in years:
                             value = child['data'].get(year, np.nan)
                             if pd.notna(value):
@@ -685,16 +688,35 @@ if current_ticker:
                                     child_row[year] = f"{value:.2f}"
                             else:
                                 child_row[year] = "N/A"
-                        rows.append(child_row)
-                    
-                    # Create and display dataframe
-                    df_section = pd.DataFrame(rows)
-                    st.dataframe(
-                        df_section,
-                        use_container_width=True,
-                        hide_index=True,
-                        height=min(400, len(rows) * 35 + 50)
-                    )
+                        all_rows.append(child_row)
+            
+            # Create buttons for each parent to toggle expansion
+            st.markdown("**Click on a row to expand/collapse details:**")
+            button_cols = st.columns(len(hierarchy))
+            for idx, parent_name in enumerate(hierarchy.keys()):
+                with button_cols[idx]:
+                    is_expanded = parent_name in st.session_state.expanded_parents
+                    button_label = f"▼ {parent_name}" if is_expanded else f"▶ {parent_name}"
+                    if st.button(button_label, key=f"toggle_{parent_name}", use_container_width=True):
+                        if parent_name in st.session_state.expanded_parents:
+                            st.session_state.expanded_parents.remove(parent_name)
+                        else:
+                            st.session_state.expanded_parents.add(parent_name)
+                        st.rerun()
+            
+            st.markdown("")
+            
+            # Create and display unified dataframe
+            df_income_display = pd.DataFrame(all_rows)
+            display_cols = ['Metric'] + years
+            df_income_display = df_income_display[display_cols]
+            
+            st.dataframe(
+                df_income_display,
+                use_container_width=True,
+                hide_index=True,
+                height=min(800, len(all_rows) * 35 + 50)
+            )
             
             st.caption("💡 Data sourced from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stocksearnings")
         else:
