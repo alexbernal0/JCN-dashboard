@@ -349,6 +349,165 @@ def get_quality_metrics(ticker):
         st.error(f"Error fetching quality metrics: {str(e)}")
         return None
 
+def get_income_statement(ticker):
+    """Get 10-year Income Statement data from MotherDuck with hierarchical structure"""
+    try:
+        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        
+        # Fetch income statement data with all necessary fields
+        df_income = conn.execute(f"""
+            SELECT symbol, date, total_revenue, cost_of_revenue, gross_profit,
+                   operating_expenses, research_and_development, 
+                   selling_general_and_administrative,
+                   operating_income, interest_expense, interest_income,
+                   other_non_operating_income_expenses, income_before_tax,
+                   income_tax_expense, net_income, ebitda
+            FROM my_db.main.pwb_stocksincomestatement
+            WHERE symbol = '{ticker}'
+            ORDER BY date DESC
+            LIMIT 50
+        """).df()
+        
+        # Fetch balance sheet for shares outstanding
+        df_balance = conn.execute(f"""
+            SELECT symbol, date, common_stock_shares_outstanding
+            FROM my_db.main.pwb_stocksbalancesheet
+            WHERE symbol = '{ticker}'
+            ORDER BY date DESC
+            LIMIT 50
+        """).df()
+        
+        # Fetch earnings for EPS
+        df_earnings = conn.execute(f"""
+            SELECT symbol, date, reported_eps
+            FROM my_db.main.pwb_stocksearnings
+            WHERE symbol = '{ticker}'
+            ORDER BY date DESC
+            LIMIT 50
+        """).df()
+        
+        conn.close()
+        
+        if df_income.empty:
+            return None
+        
+        # Convert dates
+        df_income['date'] = pd.to_datetime(df_income['date'])
+        df_balance['date'] = pd.to_datetime(df_balance['date'])
+        df_earnings['date'] = pd.to_datetime(df_earnings['date'])
+        
+        # Identify fiscal year-end
+        df_income['month_day'] = df_income['date'].dt.strftime('%m-%d')
+        fiscal_year_end = df_income['month_day'].mode()[0]
+        
+        # Filter to fiscal year-ends
+        df_income_fy = df_income[df_income['month_day'] == fiscal_year_end].head(10).copy()
+        df_balance_fy = df_balance[df_balance['date'].dt.strftime('%m-%d') == fiscal_year_end].head(10).copy()
+        df_earnings_fy = df_earnings[df_earnings['date'].dt.strftime('%m-%d') == fiscal_year_end].head(10).copy()
+        
+        # Merge data
+        df_merged = df_income_fy.copy()
+        df_merged = df_merged.merge(
+            df_balance_fy[['date', 'common_stock_shares_outstanding']],
+            on='date', how='left'
+        )
+        df_merged = df_merged.merge(
+            df_earnings_fy[['date', 'reported_eps']],
+            on='date', how='left'
+        )
+        
+        # Calculate derived metrics
+        df_merged['gross_margin'] = (df_merged['gross_profit'] / df_merged['total_revenue'] * 100).fillna(0)
+        df_merged['operating_margin'] = (df_merged['operating_income'] / df_merged['total_revenue'] * 100).fillna(0)
+        df_merged['net_margin'] = (df_merged['net_income'] / df_merged['total_revenue'] * 100).fillna(0)
+        
+        # Calculate EPS if not available
+        if df_merged['reported_eps'].isna().all() and not df_merged['common_stock_shares_outstanding'].isna().all():
+            df_merged['calculated_eps'] = (df_merged['net_income'] / df_merged['common_stock_shares_outstanding']).fillna(0)
+        else:
+            df_merged['calculated_eps'] = df_merged['reported_eps']
+        
+        # Create year column
+        df_merged['Year'] = df_merged['date'].dt.year
+        
+        # Define hierarchical structure
+        income_statement_structure = [
+            # Total Revenue (parent)
+            ('Total Revenue', 'total_revenue', True, None),
+            ('Cost of Goods Sold', 'cost_of_revenue', False, 'Total Revenue'),
+            
+            # Gross Profit (parent)
+            ('Gross Profit', 'gross_profit', True, None),
+            ('Gross Margin %', 'gross_margin', False, 'Gross Profit'),
+            ('Selling, General, Admin Expenses', 'selling_general_and_administrative', False, 'Gross Profit'),
+            ('R & D Expenses', 'research_and_development', False, 'Gross Profit'),
+            
+            # Total Operating Expenses (parent)
+            ('Total Operating Expenses', 'operating_expenses', True, None),
+            
+            # Operating Income (parent)
+            ('Operating Income', 'operating_income', True, None),
+            ('Operating Margin %', 'operating_margin', False, 'Operating Income'),
+            ('Interest Expense', 'interest_expense', False, 'Operating Income'),
+            ('Interest Income', 'interest_income', False, 'Operating Income'),
+            ('Other Expenses', 'other_non_operating_income_expenses', False, 'Operating Income'),
+            ('Income Before Tax', 'income_before_tax', False, 'Operating Income'),
+            ('Income Tax', 'income_tax_expense', False, 'Operating Income'),
+            
+            # Net Income (parent)
+            ('Net Income', 'net_income', True, None),
+            ('Net Margin %', 'net_margin', False, 'Net Income'),
+            ('Weighted Avg. Shares Out - Basic', 'common_stock_shares_outstanding', False, 'Net Income'),
+            ('Weighted Avg. Shares Out - Diluted', 'common_stock_shares_outstanding', False, 'Net Income'),
+            ('Basic EPS', 'calculated_eps', False, 'Net Income'),
+            ('EPS Diluted', 'calculated_eps', False, 'Net Income'),
+            
+            # EBITDA (parent)
+            ('EBITDA', 'ebitda', True, None),
+        ]
+        
+        # Build hierarchical data structure
+        years = sorted(df_merged['Year'].unique(), reverse=True)
+        
+        # Group items by parent
+        hierarchy = {}
+        for display_name, col_name, is_parent, parent_name in income_statement_structure:
+            if is_parent:
+                hierarchy[display_name] = {
+                    'data': {},
+                    'children': []
+                }
+                # Get parent data
+                for year in years:
+                    year_data = df_merged[df_merged['Year'] == year]
+                    if not year_data.empty and col_name in year_data.columns:
+                        hierarchy[display_name]['data'][year] = year_data[col_name].iloc[0]
+                    else:
+                        hierarchy[display_name]['data'][year] = np.nan
+            else:
+                # Add as child to parent
+                if parent_name in hierarchy:
+                    child_data = {}
+                    for year in years:
+                        year_data = df_merged[df_merged['Year'] == year]
+                        if not year_data.empty and col_name in year_data.columns:
+                            child_data[year] = year_data[col_name].iloc[0]
+                        else:
+                            child_data[year] = np.nan
+                    hierarchy[parent_name]['children'].append({
+                        'name': display_name,
+                        'data': child_data
+                    })
+        
+        return {
+            'hierarchy': hierarchy,
+            'years': years
+        }
+        
+    except Exception as e:
+        st.error(f"Error fetching income statement: {str(e)}")
+        return None
+
 # Header with logo and title
 col1, col2 = st.columns([1, 4])
 with col1:
@@ -472,6 +631,74 @@ if current_ticker:
             st.caption("💡 Data sourced from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow")
         else:
             st.warning(f"⚠️ No quality metrics data available for {current_ticker}")
+        
+        st.markdown("---")
+        
+        # Income Statement Section
+        st.subheader("📊 Income Statement")
+        
+        with st.spinner("Loading 10-year income statement..."):
+            income_data = get_income_statement(current_ticker)
+        
+        if income_data and income_data['hierarchy']:
+            hierarchy = income_data['hierarchy']
+            years = income_data['years']
+            
+            # Create a container for the income statement
+            for parent_name, parent_info in hierarchy.items():
+                # Create expander for each parent item
+                with st.expander(f"**{parent_name}**", expanded=False):
+                    # Display parent row with years
+                    parent_row = {'Metric': parent_name}
+                    for year in years:
+                        value = parent_info['data'].get(year, np.nan)
+                        if pd.notna(value):
+                            if 'Margin' in parent_name or 'EPS' in parent_name:
+                                parent_row[year] = f"{value:.2f}"
+                            elif abs(value) >= 1e9:
+                                parent_row[year] = f"{value/1e9:.2f}B"
+                            elif abs(value) >= 1e6:
+                                parent_row[year] = f"{value/1e6:.2f}M"
+                            else:
+                                parent_row[year] = f"{value:.2f}"
+                        else:
+                            parent_row[year] = "N/A"
+                    
+                    # Create dataframe for parent + children
+                    rows = [parent_row]
+                    
+                    # Add children rows
+                    for child in parent_info['children']:
+                        child_row = {'Metric': f"  {child['name']}"}
+                        for year in years:
+                            value = child['data'].get(year, np.nan)
+                            if pd.notna(value):
+                                if '%' in child['name'] or 'EPS' in child['name']:
+                                    child_row[year] = f"{value:.2f}"
+                                elif 'Shares' in child['name']:
+                                    child_row[year] = f"{value/1e9:.2f}B" if value >= 1e9 else f"{value/1e6:.2f}M"
+                                elif abs(value) >= 1e9:
+                                    child_row[year] = f"{value/1e9:.2f}B"
+                                elif abs(value) >= 1e6:
+                                    child_row[year] = f"{value/1e6:.2f}M"
+                                else:
+                                    child_row[year] = f"{value:.2f}"
+                            else:
+                                child_row[year] = "N/A"
+                        rows.append(child_row)
+                    
+                    # Create and display dataframe
+                    df_section = pd.DataFrame(rows)
+                    st.dataframe(
+                        df_section,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=min(400, len(rows) * 35 + 50)
+                    )
+            
+            st.caption("💡 Data sourced from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stocksearnings")
+        else:
+            st.warning(f"⚠️ No income statement data available for {current_ticker}")
         
         st.markdown("---")
         
