@@ -147,7 +147,7 @@ def create_financial_overview_grid(ticker, time_period='10yr'):
         
         # Fetch income statement data
         df_income = conn.execute(f"""
-            SELECT date as fiscal_year_end, total_revenue, ebitda, shares_outstanding
+            SELECT date as fiscal_year_end, total_revenue, ebitda, common_stock_shares_outstanding
             FROM my_db.main.pwb_stocksincomestatement
             WHERE symbol = '{ticker.upper()}' AND date >= '{start_date.strftime('%Y-%m-%d')}'
             ORDER BY date
@@ -165,9 +165,9 @@ def create_financial_overview_grid(ticker, time_period='10yr'):
         
         # Calculate per-share metrics
         df_metrics = df_income.merge(df_cashflow, on='fiscal_year_end', how='left')
-        df_metrics['revenue_per_share'] = df_metrics['total_revenue'] / df_metrics['shares_outstanding']
-        df_metrics['ebitda_per_share'] = df_metrics['ebitda'] / df_metrics['shares_outstanding']
-        df_metrics['fcf_per_share'] = df_metrics['free_cash_flow'] / df_metrics['shares_outstanding']
+        df_metrics['revenue_per_share'] = df_metrics['total_revenue'] / df_metrics['common_stock_shares_outstanding']
+        df_metrics['ebitda_per_share'] = df_metrics['ebitda'] / df_metrics['common_stock_shares_outstanding']
+        df_metrics['fcf_per_share'] = df_metrics['free_cash_flow'] / df_metrics['common_stock_shares_outstanding']
         
         # Create 2x2 subplot grid
         fig = make_subplots(
@@ -183,18 +183,22 @@ def create_financial_overview_grid(ticker, time_period='10yr'):
             df_prices['date'] = pd.to_datetime(df_prices['date'])
             df_spy['date'] = pd.to_datetime(df_spy['date'])
             
-            # Normalize both to 100 at start
-            stock_normalized = (df_prices['price'] / df_prices['price'].iloc[0]) * 100
-            spy_normalized = (df_spy['price'] / df_spy['price'].iloc[0]) * 100
+            # Normalize both to 1.0 at start (like reference chart)
+            stock_normalized = df_prices['price'] / df_prices['price'].iloc[0]
+            spy_normalized = df_spy['price'] / df_spy['price'].iloc[0]
             
-            fig.add_trace(
-                go.Scatter(x=df_prices['date'], y=stock_normalized,
-                          name=ticker, fill='tozeroy', line=dict(color='#1f77b4', width=2)),
-                row=1, col=1
-            )
+            # Add SPY first (gray line, behind)
             fig.add_trace(
                 go.Scatter(x=df_spy['date'], y=spy_normalized,
-                          name='SPY', line=dict(color='gray', dash='dash', width=1)),
+                          name='SPY', line=dict(color='#808080', width=2),
+                          mode='lines'),
+                row=1, col=1
+            )
+            # Add stock second (red line, in front)
+            fig.add_trace(
+                go.Scatter(x=df_prices['date'], y=stock_normalized,
+                          name=ticker, line=dict(color='#FF4444', width=2),
+                          mode='lines'),
                 row=1, col=1
             )
             
