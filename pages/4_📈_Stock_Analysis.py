@@ -4,6 +4,9 @@ import duckdb
 import os
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from datetime import datetime, timedelta
 
 st.set_page_config(
     page_title="Stock Analysis - JCN Dashboard",
@@ -57,6 +60,237 @@ def get_stock_info_from_motherduck(ticker):
         
     except Exception as e:
         st.error(f"Error fetching stock info: {str(e)}")
+        return None
+
+# Financial Overview Grid Helper Functions
+def calculate_cagr(start_value, end_value, periods):
+    """Calculate Compound Annual Growth Rate"""
+    if start_value <= 0 or end_value <= 0 or periods <= 0:
+        return np.nan
+    return ((end_value / start_value) ** (1 / periods) - 1) * 100
+
+def count_consecutive_higher(values):
+    """Count how many years show consecutively higher values"""
+    if len(values) < 2:
+        return 0
+    count = 0
+    for i in range(1, len(values)):
+        if values[i] > values[i-1]:
+            count += 1
+    return count
+
+def classify_trend(cagr_selected, cagr_1yr, cagr_3yr, cagr_5yr):
+    """
+    Classify trend based on CAGR of selected period and acceleration check
+    Returns list of classifications (can be multiple)
+    """
+    classifications = []
+    
+    # Time-period dependent classification
+    if cagr_selected < 0:
+        classifications.append("Declining 📉")
+    elif 0 <= cagr_selected < 10:
+        classifications.append("Stable ➡️")
+    elif 10 <= cagr_selected <= 20:
+        classifications.append("Growing 📈")
+    elif cagr_selected > 20:
+        classifications.append("Growing 📈")  # Strong growth still counts as growing
+    
+    # Acceleration check (independent of timeframe)
+    if pd.notna(cagr_1yr) and pd.notna(cagr_3yr) and pd.notna(cagr_5yr):
+        if cagr_1yr > cagr_3yr and cagr_3yr > cagr_5yr:
+            classifications.append("Accelerating 🚀")
+    
+    return ", ".join(classifications) if classifications else "N/A"
+
+def create_financial_overview_grid(ticker, time_period='10yr'):
+    """Create 2x2 grid of financial charts with CAGR and trend analysis"""
+    try:
+        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        
+        # Determine time window
+        end_date = datetime.now()
+        if time_period == '1yr':
+            start_date = end_date - timedelta(days=365)
+            years_back = 1
+        elif time_period == '3yr':
+            start_date = end_date - timedelta(days=365*3)
+            years_back = 3
+        elif time_period == '5yr':
+            start_date = end_date - timedelta(days=365*5)
+            years_back = 5
+        elif time_period == '10yr':
+            start_date = end_date - timedelta(days=365*10)
+            years_back = 10
+        elif time_period == '20yr':
+            start_date = end_date - timedelta(days=365*20)
+            years_back = 20
+        else:
+            start_date = end_date - timedelta(days=365*10)
+            years_back = 10
+        
+        # Fetch stock prices
+        df_prices = conn.execute(f"""
+            SELECT date, close as price
+            FROM my_db.main.pwb_allstocks
+            WHERE symbol = '{ticker.upper()}' AND date >= '{start_date.strftime('%Y-%m-%d')}'
+            ORDER BY date
+        """).df()
+        
+        # Fetch SPY prices
+        df_spy = conn.execute(f"""
+            SELECT date, close as price
+            FROM my_db.main.pwb_allETFs
+            WHERE symbol = 'SPY' AND date >= '{start_date.strftime('%Y-%m-%d')}'
+            ORDER BY date
+        """).df()
+        
+        # Fetch income statement data
+        df_income = conn.execute(f"""
+            SELECT date as fiscal_year_end, total_revenue, ebitda, shares_outstanding
+            FROM my_db.main.pwb_stocksincomestatement
+            WHERE symbol = '{ticker.upper()}' AND date >= '{start_date.strftime('%Y-%m-%d')}'
+            ORDER BY date
+        """).df()
+        
+        # Fetch cash flow data
+        df_cashflow = conn.execute(f"""
+            SELECT date as fiscal_year_end, free_cash_flow
+            FROM my_db.main.pwb_stockscashflow
+            WHERE symbol = '{ticker.upper()}' AND date >= '{start_date.strftime('%Y-%m-%d')}'
+            ORDER BY date
+        """).df()
+        
+        conn.close()
+        
+        # Calculate per-share metrics
+        df_metrics = df_income.merge(df_cashflow, on='fiscal_year_end', how='left')
+        df_metrics['revenue_per_share'] = df_metrics['total_revenue'] / df_metrics['shares_outstanding']
+        df_metrics['ebitda_per_share'] = df_metrics['ebitda'] / df_metrics['shares_outstanding']
+        df_metrics['fcf_per_share'] = df_metrics['free_cash_flow'] / df_metrics['shares_outstanding']
+        
+        # Create 2x2 subplot grid
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=('Stock Price', 'Revenue per Share', 
+                           'EBITDA per Share', 'Free Cash Flow per Share'),
+            vertical_spacing=0.15,
+            horizontal_spacing=0.1
+        )
+        
+        # Chart 1: Stock Price (line chart with SPY comparison)
+        if not df_prices.empty and not df_spy.empty:
+            df_prices['date'] = pd.to_datetime(df_prices['date'])
+            df_spy['date'] = pd.to_datetime(df_spy['date'])
+            
+            # Normalize both to 100 at start
+            stock_normalized = (df_prices['price'] / df_prices['price'].iloc[0]) * 100
+            spy_normalized = (df_spy['price'] / df_spy['price'].iloc[0]) * 100
+            
+            fig.add_trace(
+                go.Scatter(x=df_prices['date'], y=stock_normalized,
+                          name=ticker, fill='tozeroy', line=dict(color='#1f77b4', width=2)),
+                row=1, col=1
+            )
+            fig.add_trace(
+                go.Scatter(x=df_spy['date'], y=spy_normalized,
+                          name='SPY', line=dict(color='gray', dash='dash', width=1)),
+                row=1, col=1
+            )
+            
+            # Calculate CAGR for stock price
+            years = (df_prices['date'].max() - df_prices['date'].min()).days / 365.25
+            cagr = calculate_cagr(df_prices['price'].iloc[0], df_prices['price'].iloc[-1], years)
+            
+            fig.add_annotation(
+                text=f"<b>CAGR: {cagr:.1f}%</b>",
+                xref="x", yref="y",
+                x=df_prices['date'].min(), y=stock_normalized.max() * 0.9,
+                showarrow=False,
+                bgcolor="white",
+                bordercolor="black",
+                borderwidth=1,
+                font=dict(size=10),
+                align="left",
+                row=1, col=1
+            )
+        
+        # Charts 2-4: Bar charts for per-share metrics
+        metrics_to_plot = [
+            ('revenue_per_share', 'Revenue per Share', '#ff7f0e', 1, 2),
+            ('ebitda_per_share', 'EBITDA per Share', '#17becf', 2, 1),
+            ('fcf_per_share', 'Free Cash Flow per Share', '#9467bd', 2, 2)
+        ]
+        
+        for metric_col, title, color, row, col in metrics_to_plot:
+            if metric_col in df_metrics.columns:
+                df_plot = df_metrics[['fiscal_year_end', metric_col]].dropna()
+                df_plot['fiscal_year_end'] = pd.to_datetime(df_plot['fiscal_year_end'])
+                
+                if not df_plot.empty and len(df_plot) >= 2:
+                    fig.add_trace(
+                        go.Bar(x=df_plot['fiscal_year_end'], y=df_plot[metric_col],
+                              name=title, marker_color=color, showlegend=False),
+                        row=row, col=col
+                    )
+                    
+                    # Calculate CAGRs
+                    values = df_plot[metric_col].values
+                    years_data = len(values) - 1
+                    
+                    cagr_period = calculate_cagr(values[0], values[-1], years_data)
+                    cagr_1yr = calculate_cagr(values[-2], values[-1], 1) if len(values) >= 2 else np.nan
+                    cagr_3yr = calculate_cagr(values[-4], values[-1], 3) if len(values) >= 4 else np.nan
+                    cagr_5yr = calculate_cagr(values[-6], values[-1], 5) if len(values) >= 6 else np.nan
+                    cagr_10yr = calculate_cagr(values[0], values[-1], min(10, years_data)) if len(values) >= 2 else np.nan
+                    
+                    consecutive = count_consecutive_higher(values)
+                    classification = classify_trend(cagr_period, cagr_1yr, cagr_3yr, cagr_5yr)
+                    
+                    # Build annotation text
+                    annotation_lines = [f"<b>CAGR: {cagr_period:.1f}%</b>"]
+                    if pd.notna(cagr_1yr):
+                        annotation_lines.append(f"1yr: {cagr_1yr:.1f}%")
+                    if pd.notna(cagr_3yr):
+                        annotation_lines.append(f"3yr: {cagr_3yr:.1f}%")
+                    if pd.notna(cagr_5yr):
+                        annotation_lines.append(f"5yr: {cagr_5yr:.1f}%")
+                    if pd.notna(cagr_10yr):
+                        annotation_lines.append(f"10yr: {cagr_10yr:.1f}%")
+                    annotation_lines.append(f"{consecutive}/{years_data} yrs higher")
+                    annotation_lines.append(f"<b>{classification}</b>")
+                    
+                    annotation_text = "<br>".join(annotation_lines)
+                    
+                    fig.add_annotation(
+                        text=annotation_text,
+                        xref=f"x{col + (row-1)*2}", yref=f"y{col + (row-1)*2}",
+                        x=df_plot['fiscal_year_end'].min(), y=df_plot[metric_col].max() * 0.85,
+                        showarrow=False,
+                        bgcolor="white",
+                        bordercolor="black",
+                        borderwidth=1,
+                        font=dict(size=9),
+                        align="left",
+                        row=row, col=col
+                    )
+        
+        # Update layout
+        fig.update_layout(
+            height=800,
+            showlegend=True,
+            title_text=f"{ticker} - {time_period.upper()} Financial Overview",
+            title_x=0.5,
+            title_font=dict(size=20)
+        )
+        
+        fig.update_xaxes(showgrid=True, gridwidth=0.5, gridcolor='lightgray')
+        fig.update_yaxes(showgrid=True, gridwidth=0.5, gridcolor='lightgray')
+        
+        return fig
+        
+    except Exception as e:
+        st.error(f"Error creating financial overview grid: {str(e)}")
         return None
 
 def get_per_share_data(ticker):
@@ -574,6 +808,42 @@ if current_ticker:
             st.markdown(f"<h1 style='color: #1f77b4; margin: 0;'>${stock_info['current_price']:.2f}</h1>", 
                        unsafe_allow_html=True)
             st.caption(f"Last updated: {stock_info['last_updated']}")
+        
+        st.markdown("---")
+        
+        # Financial Overview Grid Section
+        st.subheader("📊 Financial Overview")
+        
+        # Time period selector
+        if 'fin_overview_period' not in st.session_state:
+            st.session_state.fin_overview_period = '10yr'
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            if st.button("1 Year", key="btn_1yr", use_container_width=True):
+                st.session_state.fin_overview_period = '1yr'
+        with col2:
+            if st.button("3 Years", key="btn_3yr", use_container_width=True):
+                st.session_state.fin_overview_period = '3yr'
+        with col3:
+            if st.button("5 Years", key="btn_5yr", use_container_width=True):
+                st.session_state.fin_overview_period = '5yr'
+        with col4:
+            if st.button("10 Years", key="btn_10yr", use_container_width=True):
+                st.session_state.fin_overview_period = '10yr'
+        with col5:
+            if st.button("20 Years", key="btn_20yr", use_container_width=True):
+                st.session_state.fin_overview_period = '20yr'
+        
+        st.write("")  # Spacing
+        
+        with st.spinner(f"Loading {st.session_state.fin_overview_period} financial data..."):
+            fin_overview_fig = create_financial_overview_grid(current_ticker, st.session_state.fin_overview_period)
+        
+        if fin_overview_fig:
+            st.plotly_chart(fin_overview_fig, use_container_width=True)
+        else:
+            st.warning("Unable to load financial overview data.")
         
         st.markdown("---")
         
