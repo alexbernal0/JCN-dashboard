@@ -465,7 +465,8 @@ if current_ticker:
             st.dataframe(
                 display_df_quality,
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                height=800  # Show all 21 rows without scrolling
             )
             
             st.caption("💡 Data sourced from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow")
