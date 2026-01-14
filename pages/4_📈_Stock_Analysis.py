@@ -147,8 +147,16 @@ def create_financial_overview_grid(ticker, time_period='10yr'):
         
         # Fetch income statement data
         df_income = conn.execute(f"""
-            SELECT date as fiscal_year_end, total_revenue, ebitda, common_stock_shares_outstanding
+            SELECT date as fiscal_year_end, total_revenue, ebitda
             FROM my_db.main.pwb_stocksincomestatement
+            WHERE symbol = '{ticker.upper()}' AND date >= '{start_date.strftime('%Y-%m-%d')}'
+            ORDER BY date
+        """).df()
+        
+        # Fetch balance sheet data for shares outstanding
+        df_balance = conn.execute(f"""
+            SELECT date as fiscal_year_end, common_stock_shares_outstanding
+            FROM my_db.main.pwb_stocksbalancesheet
             WHERE symbol = '{ticker.upper()}' AND date >= '{start_date.strftime('%Y-%m-%d')}'
             ORDER BY date
         """).df()
@@ -163,8 +171,9 @@ def create_financial_overview_grid(ticker, time_period='10yr'):
         
         conn.close()
         
-        # Calculate per-share metrics
-        df_metrics = df_income.merge(df_cashflow, on='fiscal_year_end', how='left')
+        # Merge all data sources
+        df_metrics = df_income.merge(df_balance, on='fiscal_year_end', how='left')
+        df_metrics = df_metrics.merge(df_cashflow, on='fiscal_year_end', how='left')
         df_metrics['revenue_per_share'] = df_metrics['total_revenue'] / df_metrics['common_stock_shares_outstanding']
         df_metrics['ebitda_per_share'] = df_metrics['ebitda'] / df_metrics['common_stock_shares_outstanding']
         df_metrics['fcf_per_share'] = df_metrics['free_cash_flow'] / df_metrics['common_stock_shares_outstanding']
