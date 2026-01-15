@@ -163,7 +163,7 @@ def create_financial_overview_grid(ticker, time_period='10yr'):
         
         # Fetch cash flow data
         df_cashflow = conn.execute(f"""
-            SELECT date as fiscal_year_end, free_cash_flow
+            SELECT date as fiscal_year_end, operating_cashflow, capital_expenditures
             FROM my_db.main.pwb_stockscashflow
             WHERE symbol = '{ticker.upper()}' AND date >= '{start_date.strftime('%Y-%m-%d')}'
             ORDER BY date
@@ -174,6 +174,11 @@ def create_financial_overview_grid(ticker, time_period='10yr'):
         # Merge all data sources
         df_metrics = df_income.merge(df_balance, on='fiscal_year_end', how='left')
         df_metrics = df_metrics.merge(df_cashflow, on='fiscal_year_end', how='left')
+        
+        # Calculate free cash flow (operating cashflow + capex, where capex is negative)
+        df_metrics['free_cash_flow'] = df_metrics['operating_cashflow'] + df_metrics['capital_expenditures']
+        
+        # Calculate per-share metrics
         df_metrics['revenue_per_share'] = df_metrics['total_revenue'] / df_metrics['common_stock_shares_outstanding']
         df_metrics['ebitda_per_share'] = df_metrics['ebitda'] / df_metrics['common_stock_shares_outstanding']
         df_metrics['fcf_per_share'] = df_metrics['free_cash_flow'] / df_metrics['common_stock_shares_outstanding']
