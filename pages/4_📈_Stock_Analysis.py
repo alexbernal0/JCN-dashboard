@@ -1606,11 +1606,14 @@ if current_ticker:
             growth_rates = growth_data['growth_data']
             years = growth_data['years']
             
+            # Reverse years to show newest first (left to right)
+            years_reversed = sorted(years, reverse=True)
+            
             # Build dataframe for display
             rows = []
             for metric_name in growth_rates.keys():
                 row = {'Metric': metric_name}
-                for year in years:
+                for year in years_reversed:
                     growth_value = growth_rates[metric_name].get(year, np.nan)
                     if pd.notna(growth_value):
                         row[year] = f"{growth_value:.2f}%"
