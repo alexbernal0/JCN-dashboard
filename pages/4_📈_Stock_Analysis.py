@@ -1032,6 +1032,127 @@ def get_cash_flows(ticker):
         st.error(f"Error fetching cash flows: {str(e)}")
         return None
 
+def get_growth_rates(ticker):
+    """Calculate year-over-year growth rates for comprehensive financial metrics"""
+    try:
+        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        
+        # Fetch income statement data
+        df_income = conn.execute(f"""
+            SELECT symbol, date,
+                   total_revenue, gross_profit, ebit, operating_income, net_income,
+                   research_and_development, ebitda,
+                   depreciation_and_amortization
+            FROM my_db.main.pwb_stocksincomestatement
+            WHERE symbol = '{ticker}'
+            ORDER BY date DESC
+            LIMIT 50
+        """).df()
+        
+        # Fetch balance sheet data
+        df_balance = conn.execute(f"""
+            SELECT symbol, date,
+                   total_assets, total_shareholder_equity,
+                   long_term_debt, short_term_debt, inventory,
+                   common_stock_shares_outstanding
+            FROM my_db.main.pwb_stocksbalancesheet
+            WHERE symbol = '{ticker}'
+            ORDER BY date DESC
+            LIMIT 50
+        """).df()
+        
+        # Fetch cash flow data
+        df_cashflow = conn.execute(f"""
+            SELECT symbol, date,
+                   operating_cashflow, capital_expenditures,
+                   dividend_payout_common_stock
+            FROM my_db.main.pwb_stockscashflow
+            WHERE symbol = '{ticker}'
+            ORDER BY date DESC
+            LIMIT 50
+        """).df()
+        
+        conn.close()
+        
+        if df_income.empty or df_balance.empty or df_cashflow.empty:
+            return None
+        
+        # Merge all dataframes
+        df = df_income.merge(df_balance, on=['symbol', 'date'], how='inner')
+        df = df.merge(df_cashflow, on=['symbol', 'date'], how='inner')
+        
+        # Convert dates
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # Identify fiscal year-end
+        df['month_day'] = df['date'].dt.strftime('%m-%d')
+        fiscal_year_end = df['month_day'].mode()[0]
+        
+        # Filter to fiscal year-ends
+        df_fy = df[df['month_day'] == fiscal_year_end].head(12).copy()
+        df_fy = df_fy.sort_values('date')
+        
+        # Create year column
+        df_fy['Year'] = df_fy['date'].dt.year
+        
+        # Calculate derived metrics
+        df_fy['free_cash_flow'] = df_fy['operating_cashflow'] + df_fy['capital_expenditures']
+        df_fy['total_debt'] = df_fy['long_term_debt'].fillna(0) + df_fy['short_term_debt'].fillna(0)
+        df_fy['book_value_per_share'] = df_fy['total_shareholder_equity'] / df_fy['common_stock_shares_outstanding']
+        df_fy['diluted_eps'] = df_fy['net_income'] / df_fy['common_stock_shares_outstanding']
+        
+        # Calculate EBITDA if not available
+        if df_fy['ebitda'].isna().all():
+            df_fy['ebitda'] = df_fy['ebit'] + df_fy['depreciation_and_amortization']
+        
+        # Define metrics to calculate growth for
+        growth_metrics = [
+            ('Revenue Growth', 'total_revenue'),
+            ('Gross Profit Growth', 'gross_profit'),
+            ('EBIT Growth', 'ebit'),
+            ('EBITDA Growth', 'ebitda'),
+            ('Operating Income Growth', 'operating_income'),
+            ('Net Income Growth', 'net_income'),
+            ('Diluted EPS Growth', 'diluted_eps'),
+            ('Operating Cash Flow Growth', 'operating_cashflow'),
+            ('Free Cash Flow Growth', 'free_cash_flow'),
+            ('Inventory Growth', 'inventory'),
+            ('Total Asset Growth', 'total_assets'),
+            ('Shareholders\' Equity Growth', 'total_shareholder_equity'),
+            ('Book Value per Share Growth', 'book_value_per_share'),
+            ('Debt Growth', 'total_debt'),
+            ('Dividend Growth', 'dividend_payout_common_stock'),
+            ('R&D Expense Growth', 'research_and_development'),
+        ]
+        
+        # Calculate year-over-year growth rates
+        growth_data = {}
+        years = sorted(df_fy['Year'].unique())
+        
+        for metric_name, column_name in growth_metrics:
+            growth_data[metric_name] = {}
+            for i in range(1, len(years)):
+                current_year = years[i]
+                previous_year = years[i-1]
+                
+                current_value = df_fy[df_fy['Year'] == current_year][column_name].iloc[0]
+                previous_value = df_fy[df_fy['Year'] == previous_year][column_name].iloc[0]
+                
+                if pd.notna(current_value) and pd.notna(previous_value) and previous_value != 0:
+                    growth_rate = ((current_value - previous_value) / abs(previous_value)) * 100
+                    growth_data[metric_name][current_year] = growth_rate
+                else:
+                    growth_data[metric_name][current_year] = np.nan
+        
+        return {
+            'growth_data': growth_data,
+            'years': years[1:]  # Exclude first year (no prior year to compare)
+        }
+        
+    except Exception as e:
+        st.error(f"Error calculating growth rates: {str(e)}")
+        return None
+
 # Header with logo and title
 col1, col2 = st.columns([1, 4])
 with col1:
@@ -1184,8 +1305,7 @@ if current_ticker:
             st.dataframe(
                 display_df_quality,
                 use_container_width=True,
-                hide_index=True,
-                height=800  # Show all 21 rows without scrolling
+                hide_index=True
             )
             
             st.caption("💡 Data sourced from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow")
@@ -1473,6 +1593,43 @@ if current_ticker:
             st.caption("💡 Data sourced from MotherDuck: pwb_stockscashflow | Free Cash Flow = Operating Cash Flow + Capital Expenditures")
         else:
             st.warning(f"⚠️ No cash flow data available for {current_ticker}")
+        
+        st.markdown("---")
+        
+        # Growth Rates Section
+        st.subheader("📈 Growth Rates")
+        
+        with st.spinner("Calculating year-over-year growth rates..."):
+            growth_data = get_growth_rates(current_ticker)
+        
+        if growth_data and growth_data['growth_data']:
+            growth_rates = growth_data['growth_data']
+            years = growth_data['years']
+            
+            # Build dataframe for display
+            rows = []
+            for metric_name in growth_rates.keys():
+                row = {'Metric': metric_name}
+                for year in years:
+                    growth_value = growth_rates[metric_name].get(year, np.nan)
+                    if pd.notna(growth_value):
+                        row[year] = f"{growth_value:.2f}%"
+                    else:
+                        row[year] = "-"
+                rows.append(row)
+            
+            df_growth = pd.DataFrame(rows)
+            
+            # Display the table
+            st.dataframe(
+                df_growth,
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            st.caption("💡 Year-over-year growth rates calculated from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow")
+        else:
+            st.warning(f"⚠️ No growth rate data available for {current_ticker}")
         
     else:
         st.error(f"❌ No data found for ticker '{current_ticker}' in MotherDuck database.")
