@@ -1277,8 +1277,7 @@ if current_ticker:
             st.dataframe(
                 display_df,
                 use_container_width=True,
-                hide_index=True,
-                height=None  # Show all rows without scrolling
+                hide_index=True
             )
             
             st.caption("💡 Data sourced from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow, PWB_Allstocks_weekly")
@@ -1306,8 +1305,7 @@ if current_ticker:
             st.dataframe(
                 display_df_quality,
                 use_container_width=True,
-                hide_index=True,
-                height=None  # Show all rows without scrolling
+                hide_index=True
             )
             
             st.caption("💡 Data sourced from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow")
@@ -1629,8 +1627,7 @@ if current_ticker:
             st.dataframe(
                 df_growth,
                 use_container_width=True,
-                hide_index=True,
-                height=None  # Show all rows without scrolling
+                hide_index=True
             )
             
             st.caption("💡 Year-over-year growth rates calculated from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow")
