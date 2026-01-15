@@ -988,8 +988,8 @@ if current_ticker:
                 with button_cols[idx]:
                     is_expanded = parent_name in st.session_state.expanded_parents
                     arrow = "▼" if is_expanded else "▶"
-                    # Compact button with just arrow
-                    if st.button(f"{arrow}", key=f"toggle_{parent_name}", help=parent_name):
+                    # Button with arrow and parent name
+                    if st.button(f"{arrow} {parent_name}", key=f"toggle_{parent_name}"):
                         if parent_name in st.session_state.expanded_parents:
                             st.session_state.expanded_parents.remove(parent_name)
                         else:
