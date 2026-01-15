@@ -760,6 +760,166 @@ def get_income_statement(ticker):
         st.error(f"Error fetching income statement: {str(e)}")
         return None
 
+def get_balance_sheet(ticker):
+    """Get 10-year Balance Sheet data from MotherDuck with hierarchical structure"""
+    try:
+        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        
+        # Fetch comprehensive balance sheet data (using verified column names)
+        df_balance = conn.execute(f"""
+            SELECT symbol, date,
+                   cash_and_cash_equivalents_at_carrying_value,
+                   short_term_investments,
+                   total_current_assets,
+                   current_net_receivables,
+                   inventory,
+                   other_current_assets,
+                   other_non_current_assets,
+                   property_plant_equipment,
+                   long_term_investments,
+                   goodwill,
+                   intangible_assets,
+                   total_non_current_assets,
+                   total_assets,
+                   current_accounts_payable,
+                   other_current_liabilities,
+                   short_term_debt,
+                   deferred_revenue,
+                   total_current_liabilities,
+                   long_term_debt,
+                   other_non_current_liabilities,
+                   total_non_current_liabilities,
+                   capital_lease_obligations,
+                   total_liabilities,
+                   common_stock,
+                   retained_earnings,
+                   treasury_stock,
+                   total_shareholder_equity,
+                   common_stock_shares_outstanding
+            FROM my_db.main.pwb_stocksbalancesheet
+            WHERE symbol = '{ticker}'
+            ORDER BY date DESC
+            LIMIT 50
+        """).df()
+        
+        conn.close()
+        
+        if df_balance.empty:
+            return None
+        
+        # Convert dates
+        df_balance['date'] = pd.to_datetime(df_balance['date'])
+        
+        # Identify fiscal year-end
+        df_balance['month_day'] = df_balance['date'].dt.strftime('%m-%d')
+        fiscal_year_end = df_balance['month_day'].mode()[0]
+        
+        # Filter to fiscal year-ends
+        df_balance_fy = df_balance[df_balance['month_day'] == fiscal_year_end].head(10).copy()
+        
+        # Create year column
+        df_balance_fy['Year'] = df_balance_fy['date'].dt.year
+        
+        # Define hierarchical structure matching reference image
+        balance_sheet_structure = [
+            # Assets Section
+            # Cash & Short Term Investments (parent)
+            ('Cash & Short Term Investments', 'calculated_cash_short_term', True, None),
+            ('Cash & Cash Equivalents', 'cash_and_cash_equivalents_at_carrying_value', False, 'Cash & Short Term Investments'),
+            ('Short Term Investments', 'short_term_investments', False, 'Cash & Short Term Investments'),
+            
+            # Current Assets (parent)
+            ('Current Assets', 'total_current_assets', True, None),
+            ('Total Receivables', 'current_net_receivables', False, 'Current Assets'),
+            ('Total Inventory', 'inventory', False, 'Current Assets'),
+            ('Other Current Assets', 'other_current_assets', False, 'Current Assets'),
+            
+            # Noncurrent Assets (parent)
+            ('Noncurrent Assets', 'total_non_current_assets', True, None),
+            ('Other Noncurrent Assets', 'other_non_current_assets', False, 'Noncurrent Assets'),
+            ('Net Property, Plant & Equipment', 'property_plant_equipment', False, 'Noncurrent Assets'),
+            ('Long Term Investments', 'long_term_investments', False, 'Noncurrent Assets'),
+            ('Goodwill', 'goodwill', False, 'Noncurrent Assets'),
+            ('Intangible Assets', 'intangible_assets', False, 'Noncurrent Assets'),
+            
+            # TOTAL ASSETS (parent)
+            ('TOTAL ASSETS', 'total_assets', True, None),
+            
+            # Liabilities & Shareholders' Equity Section
+            # Current Liabilities (parent)
+            ('Current Liabilities', 'total_current_liabilities', True, None),
+            ('Accounts Payable', 'current_accounts_payable', False, 'Current Liabilities'),
+            ('Other Current Liabilities', 'other_current_liabilities', False, 'Current Liabilities'),
+            ('Short Term Debt', 'short_term_debt', False, 'Current Liabilities'),
+            ('Deferred Revenue', 'deferred_revenue', False, 'Current Liabilities'),
+            
+            # Noncurrent Liabilities (parent)
+            ('Noncurrent Liabilities', 'total_non_current_liabilities', True, None),
+            ('Long Term Debt', 'long_term_debt', False, 'Noncurrent Liabilities'),
+            ('Other Noncurrent Liabilities', 'other_non_current_liabilities', False, 'Noncurrent Liabilities'),
+            
+            # Other Liabilities (parent)
+            ('Other Liabilities', 'capital_lease_obligations', True, None),
+            ('Capital Lease Obligations', 'capital_lease_obligations', False, 'Other Liabilities'),
+            
+            # TOTAL LIABILITIES (parent)
+            ('TOTAL LIABILITIES', 'total_liabilities', True, None),
+            
+            # Shareholders' Equity (parent)
+            ('Shareholders\' Equity', 'total_shareholder_equity', True, None),
+            ('Common Stock', 'common_stock', False, 'Shareholders\' Equity'),
+            ('Retained Earnings', 'retained_earnings', False, 'Shareholders\' Equity'),
+            ('Treasury Stock', 'treasury_stock', False, 'Shareholders\' Equity'),
+        ]
+        
+        # Calculate Cash & Short Term Investments total
+        df_balance_fy['calculated_cash_short_term'] = (
+            df_balance_fy['cash_and_cash_equivalents_at_carrying_value'].fillna(0) + 
+            df_balance_fy['short_term_investments'].fillna(0)
+        )
+        
+        # Build hierarchical data structure
+        years = sorted(df_balance_fy['Year'].unique(), reverse=True)
+        
+        # Group items by parent
+        hierarchy = {}
+        for display_name, col_name, is_parent, parent_name in balance_sheet_structure:
+            if is_parent:
+                hierarchy[display_name] = {
+                    'data': {},
+                    'children': []
+                }
+                # Get parent data
+                for year in years:
+                    year_data = df_balance_fy[df_balance_fy['Year'] == year]
+                    if not year_data.empty and col_name in year_data.columns:
+                        hierarchy[display_name]['data'][year] = year_data[col_name].iloc[0]
+                    else:
+                        hierarchy[display_name]['data'][year] = np.nan
+            else:
+                # Add as child to parent
+                if parent_name in hierarchy:
+                    child_data = {}
+                    for year in years:
+                        year_data = df_balance_fy[df_balance_fy['Year'] == year]
+                        if not year_data.empty and col_name in year_data.columns:
+                            child_data[year] = year_data[col_name].iloc[0]
+                        else:
+                            child_data[year] = np.nan
+                    hierarchy[parent_name]['children'].append({
+                        'name': display_name,
+                        'data': child_data
+                    })
+        
+        return {
+            'hierarchy': hierarchy,
+            'years': years
+        }
+        
+    except Exception as e:
+        st.error(f"Error fetching balance sheet: {str(e)}")
+        return None
+
 # Header with logo and title
 col1, col2 = st.columns([1, 4])
 with col1:
@@ -1014,8 +1174,91 @@ if current_ticker:
         
         st.markdown("---")
         
-        # Placeholder for additional modules
-        st.info("📊 Additional analysis modules will be added below")
+        # Balance Sheet Section
+        st.subheader("📊 Balance Sheet")
+        
+        with st.spinner("Loading 10-year balance sheet..."):
+            balance_data = get_balance_sheet(current_ticker)
+        
+        if balance_data and balance_data['hierarchy']:
+            hierarchy = balance_data['hierarchy']
+            years = balance_data['years']
+            
+            # Initialize session state for expanded balance sheet parents
+            if 'expanded_balance_parents' not in st.session_state:
+                st.session_state.expanded_balance_parents = set()
+            
+            # Build all rows for the unified table
+            all_rows = []
+            
+            for parent_name, parent_info in hierarchy.items():
+                # Add parent row with inline arrow
+                is_expanded = parent_name in st.session_state.expanded_balance_parents
+                arrow = "▼" if is_expanded else "▶"
+                parent_row = {'Metric': f"{arrow} {parent_name}", 'is_parent': True, 'parent_name': parent_name}
+                for year in years:
+                    value = parent_info['data'].get(year, np.nan)
+                    if pd.notna(value):
+                        if abs(value) >= 1e9:
+                            parent_row[year] = f"{value/1e9:.2f}B"
+                        elif abs(value) >= 1e6:
+                            parent_row[year] = f"{value/1e6:.2f}M"
+                        else:
+                            parent_row[year] = f"{value:.2f}"
+                    else:
+                        parent_row[year] = "N/A"
+                all_rows.append(parent_row)
+                
+                # Add children rows if parent is expanded
+                if parent_name in st.session_state.expanded_balance_parents:
+                    for child in parent_info['children']:
+                        child_row = {'Metric': f"    {child['name']}", 'is_parent': False, 'parent_name': parent_name}
+                        for year in years:
+                            value = child['data'].get(year, np.nan)
+                            if pd.notna(value):
+                                if 'Shares' in child['name']:
+                                    child_row[year] = f"{value/1e9:.2f}B" if value >= 1e9 else f"{value/1e6:.2f}M"
+                                elif abs(value) >= 1e9:
+                                    child_row[year] = f"{value/1e9:.2f}B"
+                                elif abs(value) >= 1e6:
+                                    child_row[year] = f"{value/1e6:.2f}M"
+                                else:
+                                    child_row[year] = f"{value:.2f}"
+                            else:
+                                child_row[year] = "N/A"
+                        all_rows.append(child_row)
+            
+            # Create compact toggle buttons
+            parent_names = list(hierarchy.keys())
+            button_cols = st.columns(len(parent_names))
+            
+            for idx, parent_name in enumerate(parent_names):
+                with button_cols[idx]:
+                    is_expanded = parent_name in st.session_state.expanded_balance_parents
+                    arrow = "▼" if is_expanded else "▶"
+                    # Button with arrow and parent name
+                    if st.button(f"{arrow} {parent_name}", key=f"toggle_balance_{parent_name}"):
+                        if parent_name in st.session_state.expanded_balance_parents:
+                            st.session_state.expanded_balance_parents.remove(parent_name)
+                        else:
+                            st.session_state.expanded_balance_parents.add(parent_name)
+                        st.rerun()
+            
+            # Create and display unified dataframe
+            df_balance_display = pd.DataFrame(all_rows)
+            display_cols = ['Metric'] + years
+            df_balance_display = df_balance_display[display_cols]
+            
+            st.dataframe(
+                df_balance_display,
+                use_container_width=True,
+                hide_index=True,
+                height=min(800, len(all_rows) * 35 + 50)
+            )
+            
+            st.caption("💡 Data sourced from MotherDuck: pwb_stocksbalancesheet")
+        else:
+            st.warning(f"⚠️ No balance sheet data available for {current_ticker}")
         
     else:
         st.error(f"❌ No data found for ticker '{current_ticker}' in MotherDuck database.")
