@@ -1273,11 +1273,13 @@ if current_ticker:
                 if col != 'Metric':
                     display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
             
-            # Display the table
+            # Display the table with calculated height to show all rows
+            table_height = len(display_df) * 35 + 38  # 35px per row + 38px for header
             st.dataframe(
                 display_df,
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                height=table_height
             )
             
             st.caption("💡 Data sourced from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow, PWB_Allstocks_weekly")
@@ -1301,11 +1303,13 @@ if current_ticker:
                 if col != 'Metric':
                     display_df_quality[col] = display_df_quality[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
             
-            # Display the table
+            # Display the table with calculated height to show all rows
+            table_height = len(display_df_quality) * 35 + 38  # 35px per row + 38px for header
             st.dataframe(
                 display_df_quality,
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                height=table_height
             )
             
             st.caption("💡 Data sourced from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow")
@@ -1623,11 +1627,13 @@ if current_ticker:
             
             df_growth = pd.DataFrame(rows)
             
-            # Display the table
+            # Display the table with calculated height to show all rows
+            table_height = len(df_growth) * 35 + 38  # 35px per row + 38px for header
             st.dataframe(
                 df_growth,
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                height=table_height
             )
             
             st.caption("💡 Year-over-year growth rates calculated from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow")
