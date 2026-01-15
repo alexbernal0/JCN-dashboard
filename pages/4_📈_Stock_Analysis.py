@@ -1799,8 +1799,7 @@ if current_ticker:
             st.caption(f"📊 Sector: **{sector}**")
             
             # Create HTML table with progress bars
-            html = """
-            <style>
+            html = """<style>
             .valuation-table {
                 width: 100%;
                 border-collapse: collapse;
