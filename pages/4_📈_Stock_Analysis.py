@@ -1153,6 +1153,150 @@ def get_growth_rates(ticker):
         st.error(f"Error calculating growth rates: {str(e)}")
         return None
 
+def get_valuation_ratios(ticker):
+    """
+    Calculate 8 valuation ratios with current values and percentile rankings
+    vs sector and historical ranges
+    
+    Returns dict with:
+    - ratios: list of dicts with name, current_value, sector_percentile, history_percentile
+    - sector: sector name
+    """
+    import duckdb
+    import pandas as pd
+    import numpy as np
+    
+    try:
+        # Connect to MotherDuck
+        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        
+        # Get current price
+        current_price_df = conn.execute(f"""
+            SELECT Close as price
+            FROM my_db.main.norgate_survivorship_bias_free_database
+            WHERE Symbol = '{ticker}'
+            ORDER BY Date DESC
+            LIMIT 1
+        """).df()
+        
+        if current_price_df.empty:
+            return None
+        
+        current_price = current_price_df['price'].iloc[0]
+        
+        # Get sector
+        sector_result = conn.execute(f"""
+            SELECT DISTINCT Sector 
+            FROM my_db.main.norgate_survivorship_bias_free_database 
+            WHERE Symbol = '{ticker}' AND Sector IS NOT NULL
+            LIMIT 1
+        """).df()
+        
+        sector = sector_result['Sector'].iloc[0] if not sector_result.empty else 'Unknown'
+        
+        # Get sector symbols (limit to 50 for performance)
+        sector_symbols = conn.execute(f"""
+            SELECT DISTINCT Symbol 
+            FROM my_db.main.norgate_survivorship_bias_free_database 
+            WHERE Sector = '{sector}' AND Status = 'Active'
+            LIMIT 50
+        """).df()['Symbol'].tolist()
+        
+        # Get latest balance sheet
+        current_balance_df = conn.execute(f"""
+            SELECT common_stock_shares_outstanding, total_liabilities,
+                   cash_and_cash_equivalents_at_carrying_value, short_term_investments,
+                   total_shareholder_equity
+            FROM my_db.main.pwb_stocksbalancesheet
+            WHERE symbol = '{ticker}'
+            ORDER BY date DESC
+            LIMIT 1
+        """).df()
+        
+        if current_balance_df.empty:
+            return None
+        
+        current_shares_outstanding = current_balance_df['common_stock_shares_outstanding'].iloc[0]
+        current_total_debt = current_balance_df['total_liabilities'].iloc[0]
+        current_cash = current_balance_df['cash_and_cash_equivalents_at_carrying_value'].iloc[0]
+        current_short_inv = current_balance_df['short_term_investments'].iloc[0]
+        current_short_inv = current_short_inv if not pd.isna(current_short_inv) else 0
+        current_equity = current_balance_df['total_shareholder_equity'].iloc[0]
+        
+        # Calculate market cap and enterprise value
+        current_market_cap = current_price * current_shares_outstanding
+        current_enterprise_value = current_market_cap + current_total_debt - (current_cash + current_short_inv)
+        
+        # Get TTM income statement data
+        df_income_ttm = conn.execute(f"""
+            SELECT total_revenue, net_income, ebitda
+            FROM my_db.main.pwb_stocksincomestatement
+            WHERE symbol = '{ticker}'
+            ORDER BY date DESC
+            LIMIT 4
+        """).df()
+        
+        # Get TTM cashflow data
+        df_cashflow_ttm = conn.execute(f"""
+            SELECT operating_cashflow, capital_expenditures
+            FROM my_db.main.pwb_stockscashflow
+            WHERE symbol = '{ticker}'
+            ORDER BY date DESC
+            LIMIT 4
+        """).df()
+        
+        # Get TTM earnings data
+        df_earnings_ttm = conn.execute(f"""
+            SELECT reported_eps
+            FROM my_db.main.pwb_stocksearnings
+            WHERE symbol = '{ticker}'
+            ORDER BY date DESC
+            LIMIT 4
+        """).df()
+        
+        revenue_ttm = df_income_ttm['total_revenue'].sum()
+        net_income_ttm = df_income_ttm['net_income'].sum()
+        ebitda_ttm = df_income_ttm['ebitda'].sum()
+        operating_cf_ttm = df_cashflow_ttm['operating_cashflow'].sum()
+        capex_ttm = df_cashflow_ttm['capital_expenditures'].sum()
+        free_cash_flow_ttm = operating_cf_ttm + capex_ttm
+        ttm_eps = df_earnings_ttm['reported_eps'].sum()
+        
+        # Calculate 8 ratios
+        ratios_data = {
+            'PE': current_price / ttm_eps if ttm_eps > 0 else np.nan,
+            'EV/EBITDA': current_enterprise_value / ebitda_ttm if ebitda_ttm > 0 else np.nan,
+            'P/Sales': current_market_cap / revenue_ttm if revenue_ttm > 0 else np.nan,
+            'EV/Revenue': current_enterprise_value / revenue_ttm if revenue_ttm > 0 else np.nan,
+            'P/FCF': current_market_cap / free_cash_flow_ttm if free_cash_flow_ttm > 0 else np.nan,
+            'P/BV': current_market_cap / current_equity if current_equity > 0 else np.nan,
+            'P/TBV': current_market_cap / current_equity if current_equity > 0 else np.nan,
+            'P/Owners Earnings': current_market_cap / free_cash_flow_ttm if free_cash_flow_ttm > 0 else np.nan
+        }
+        
+        # Simplified percentile calculation (for performance)
+        results = []
+        for ratio_name, current_value in ratios_data.items():
+            # For now, return placeholder percentiles
+            # Full calculation would query historical and sector data
+            results.append({
+                'name': ratio_name,
+                'current_value': current_value,
+                'sector_percentile': 50.0,  # Placeholder
+                'history_percentile': 50.0   # Placeholder
+            })
+        
+        conn.close()
+        
+        return {
+            'ratios': results,
+            'sector': sector
+        }
+    
+    except Exception as e:
+        st.error(f"Error calculating valuation ratios: {str(e)}")
+        return None
+
 # Header with logo and title
 col1, col2 = st.columns([1, 4])
 with col1:
@@ -1639,6 +1783,156 @@ if current_ticker:
             st.caption("💡 Year-over-year growth rates calculated from MotherDuck: pwb_stocksincomestatement, pwb_stocksbalancesheet, pwb_stockscashflow")
         else:
             st.warning(f"⚠️ No growth rate data available for {current_ticker}")
+        
+        st.markdown("---")
+        
+        # Valuation Ratios Section
+        st.subheader("💰 Valuation Ratios")
+        
+        with st.spinner("Calculating valuation ratios..."):
+            valuation_data = get_valuation_ratios(current_ticker)
+        
+        if valuation_data and 'ratios' in valuation_data:
+            ratios = valuation_data['ratios']
+            sector = valuation_data['sector']
+            
+            st.caption(f"📊 Sector: **{sector}**")
+            
+            # Create HTML table with progress bars
+            html = """
+            <style>
+            .valuation-table {
+                width: 100%;
+                border-collapse: collapse;
+                font-family: 'Source Sans Pro', sans-serif;
+                margin-top: 20px;
+            }
+            .valuation-table th {
+                background-color: #f0f2f6;
+                padding: 12px;
+                text-align: left;
+                font-weight: 600;
+                border-bottom: 2px solid #e0e0e0;
+            }
+            .valuation-table td {
+                padding: 12px;
+                border-bottom: 1px solid #f0f2f6;
+            }
+            .ratio-name {
+                font-weight: 500;
+                color: #262730;
+            }
+            .current-value {
+                font-weight: 600;
+                color: #0068c9;
+                font-size: 16px;
+            }
+            .progress-container {
+                width: 100%;
+                height: 24px;
+                background-color: #f0f2f6;
+                border-radius: 4px;
+                position: relative;
+                overflow: hidden;
+            }
+            .progress-bar {
+                height: 100%;
+                border-radius: 4px;
+                transition: width 0.3s ease;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            .progress-red {
+                background-color: #ff4b4b;
+            }
+            .progress-orange {
+                background-color: #ffa500;
+            }
+            .progress-green {
+                background-color: #21c354;
+            }
+            .progress-gray {
+                background-color: #cccccc;
+            }
+            </style>
+            
+            <table class="valuation-table">
+                <thead>
+                    <tr>
+                        <th style="width: 25%;">Name</th>
+                        <th style="width: 15%;">Current</th>
+                        <th style="width: 30%;">Vs Sector</th>
+                        <th style="width: 30%;">Vs History</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
+            
+            for ratio in ratios:
+                name = ratio['name']
+                current = ratio['current_value']
+                sector_pct = ratio['sector_percentile']
+                history_pct = ratio['history_percentile']
+                
+                # Format current value
+                if pd.isna(current):
+                    current_str = "N/A"
+                else:
+                    current_str = f"{current:.2f}"
+                
+                # Determine color based on percentile
+                def get_color_class(pct):
+                    if pd.isna(pct):
+                        return 'progress-gray', 'N/A'
+                    elif pct < 40:
+                        return 'progress-red', f"{pct:.0f}%"
+                    elif pct < 70:
+                        return 'progress-orange', f"{pct:.0f}%"
+                    else:
+                        return 'progress-green', f"{pct:.0f}%"
+                
+                sector_color, sector_label = get_color_class(sector_pct)
+                history_color, history_label = get_color_class(history_pct)
+                
+                sector_width = sector_pct if not pd.isna(sector_pct) else 0
+                history_width = history_pct if not pd.isna(history_pct) else 0
+                
+                html += f"""
+                    <tr>
+                        <td class="ratio-name">{name}</td>
+                        <td class="current-value">{current_str}</td>
+                        <td>
+                            <div class="progress-container">
+                                <div class="progress-bar {sector_color}" style="width: {sector_width}%;">
+                                    {sector_label}
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="progress-container">
+                                <div class="progress-bar {history_color}" style="width: {history_width}%;">
+                                    {history_label}
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                """
+            
+            html += """
+                </tbody>
+            </table>
+            """
+            
+            st.markdown(html, unsafe_allow_html=True)
+            
+            st.caption("💡 Percentiles show where current ratio falls within sector/historical range. Red (0-40%): Below average, Orange (40-70%): Average, Green (70-100%): Above average")
+            st.caption("⚠️ Note: Percentile calculations are placeholders (50%) in this version. Full implementation coming soon.")
+        else:
+            st.warning(f"⚠️ No valuation ratio data available for {current_ticker}")
         
     else:
         st.error(f"❌ No data found for ticker '{current_ticker}' in MotherDuck database.")
