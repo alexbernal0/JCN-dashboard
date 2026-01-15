@@ -920,6 +920,118 @@ def get_balance_sheet(ticker):
         st.error(f"Error fetching balance sheet: {str(e)}")
         return None
 
+def get_cash_flows(ticker):
+    """Get 10-year Cash Flows data from MotherDuck with hierarchical structure"""
+    try:
+        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        
+        # Fetch cash flow data (only columns with consistent data)
+        df_cashflow = conn.execute(f"""
+            SELECT symbol, date,
+                   net_income,
+                   depreciation_depletion_and_amortization,
+                   change_in_inventory,
+                   operating_cashflow,
+                   capital_expenditures,
+                   cashflow_from_investment,
+                   dividend_payout_common_stock,
+                   proceeds_from_repurchase_of_equity,
+                   cashflow_from_financing
+            FROM my_db.main.pwb_stockscashflow
+            WHERE symbol = '{ticker}'
+            ORDER BY date DESC
+            LIMIT 50
+        """).df()
+        
+        conn.close()
+        
+        if df_cashflow.empty:
+            return None
+        
+        # Convert dates
+        df_cashflow['date'] = pd.to_datetime(df_cashflow['date'])
+        
+        # Identify fiscal year-end
+        df_cashflow['month_day'] = df_cashflow['date'].dt.strftime('%m-%d')
+        fiscal_year_end = df_cashflow['month_day'].mode()[0]
+        
+        # Filter to fiscal year-ends
+        df_cashflow_fy = df_cashflow[df_cashflow['month_day'] == fiscal_year_end].head(10).copy()
+        
+        # Create year column
+        df_cashflow_fy['Year'] = df_cashflow_fy['date'].dt.year
+        
+        # Calculate Free Cash Flow
+        df_cashflow_fy['free_cash_flow'] = (
+            df_cashflow_fy['operating_cashflow'] + 
+            df_cashflow_fy['capital_expenditures']
+        )
+        
+        # Define hierarchical structure with available data
+        # Format: (display_name, column_name, is_parent, parent_name)
+        cash_flow_structure = [
+            # Operations (parent)
+            ('Cash from Operations', 'operating_cashflow', True, None),
+            ('Net Income', 'net_income', False, 'Cash from Operations'),
+            ('Depreciation & Amortization', 'depreciation_depletion_and_amortization', False, 'Cash from Operations'),
+            ('Change in Inventory', 'change_in_inventory', False, 'Cash from Operations'),
+            
+            # Investing (parent)
+            ('Cash From Investing', 'cashflow_from_investment', True, None),
+            ('Capital Expenditures', 'capital_expenditures', False, 'Cash From Investing'),
+            
+            # Financing (parent)
+            ('Cash from Financing', 'cashflow_from_financing', True, None),
+            ('Total Dividends Paid', 'dividend_payout_common_stock', False, 'Cash from Financing'),
+            ('Common Stock Repurchased', 'proceeds_from_repurchase_of_equity', False, 'Cash from Financing'),
+        ]
+        
+        # Build hierarchical data structure
+        years = sorted(df_cashflow_fy['Year'].unique(), reverse=True)
+        
+        # Group items by parent
+        hierarchy = {}
+        for display_name, col_name, is_parent, parent_name in cash_flow_structure:
+            if is_parent:
+                hierarchy[display_name] = {
+                    'data': {},
+                    'children': []
+                }
+                # Get parent data
+                for year in years:
+                    year_data = df_cashflow_fy[df_cashflow_fy['Year'] == year]
+                    if not year_data.empty and col_name in year_data.columns:
+                        hierarchy[display_name]['data'][year] = year_data[col_name].iloc[0]
+            else:
+                # This is a child item
+                if parent_name in hierarchy:
+                    child_data = {}
+                    for year in years:
+                        year_data = df_cashflow_fy[df_cashflow_fy['Year'] == year]
+                        if not year_data.empty and col_name in year_data.columns:
+                            child_data[year] = year_data[col_name].iloc[0]
+                    hierarchy[parent_name]['children'].append({
+                        'name': display_name,
+                        'data': child_data
+                    })
+        
+        # Add Free Cash Flow data (always visible, not part of hierarchy)
+        free_cash_flow_data = {}
+        for year in years:
+            year_data = df_cashflow_fy[df_cashflow_fy['Year'] == year]
+            if not year_data.empty:
+                free_cash_flow_data[year] = year_data['free_cash_flow'].iloc[0]
+        
+        return {
+            'hierarchy': hierarchy,
+            'years': years,
+            'free_cash_flow': free_cash_flow_data
+        }
+        
+    except Exception as e:
+        st.error(f"Error fetching cash flows: {str(e)}")
+        return None
+
 # Header with logo and title
 col1, col2 = st.columns([1, 4])
 with col1:
@@ -1259,6 +1371,108 @@ if current_ticker:
             st.caption("💡 Data sourced from MotherDuck: pwb_stocksbalancesheet")
         else:
             st.warning(f"⚠️ No balance sheet data available for {current_ticker}")
+        
+        st.markdown("---")
+        
+        # Cash Flows Section
+        st.subheader("💵 Cash Flows")
+        
+        with st.spinner("Loading 10-year cash flows..."):
+            cashflow_data = get_cash_flows(current_ticker)
+        
+        if cashflow_data and cashflow_data['hierarchy']:
+            hierarchy = cashflow_data['hierarchy']
+            years = cashflow_data['years']
+            free_cash_flow = cashflow_data['free_cash_flow']
+            
+            # Initialize session state for expanded cash flow parents
+            if 'expanded_cashflow_parents' not in st.session_state:
+                st.session_state.expanded_cashflow_parents = set()
+            
+            # Build all rows for the unified table
+            all_rows = []
+            
+            for parent_name, parent_info in hierarchy.items():
+                # Add parent row with inline arrow
+                is_expanded = parent_name in st.session_state.expanded_cashflow_parents
+                arrow = "▼" if is_expanded else "▶"
+                parent_row = {'Metric': f"{arrow} {parent_name}", 'is_parent': True, 'parent_name': parent_name}
+                for year in years:
+                    value = parent_info['data'].get(year, np.nan)
+                    if pd.notna(value):
+                        if abs(value) >= 1e9:
+                            parent_row[year] = f"{value/1e9:.2f}B"
+                        elif abs(value) >= 1e6:
+                            parent_row[year] = f"{value/1e6:.2f}M"
+                        else:
+                            parent_row[year] = f"{value:.2f}"
+                    else:
+                        parent_row[year] = "N/A"
+                all_rows.append(parent_row)
+                
+                # Add children rows if parent is expanded
+                if parent_name in st.session_state.expanded_cashflow_parents:
+                    for child in parent_info['children']:
+                        child_row = {'Metric': f"    {child['name']}", 'is_parent': False, 'parent_name': parent_name}
+                        for year in years:
+                            value = child['data'].get(year, np.nan)
+                            if pd.notna(value):
+                                if abs(value) >= 1e9:
+                                    child_row[year] = f"{value/1e9:.2f}B"
+                                elif abs(value) >= 1e6:
+                                    child_row[year] = f"{value/1e6:.2f}M"
+                                else:
+                                    child_row[year] = f"{value:.2f}"
+                            else:
+                                child_row[year] = "N/A"
+                        all_rows.append(child_row)
+            
+            # Add Free Cash Flow row (always visible)
+            fcf_row = {'Metric': '💰 Free Cash Flow', 'is_parent': False, 'parent_name': None}
+            for year in years:
+                value = free_cash_flow.get(year, np.nan)
+                if pd.notna(value):
+                    if abs(value) >= 1e9:
+                        fcf_row[year] = f"{value/1e9:.2f}B"
+                    elif abs(value) >= 1e6:
+                        fcf_row[year] = f"{value/1e6:.2f}M"
+                    else:
+                        fcf_row[year] = f"{value:.2f}"
+                else:
+                    fcf_row[year] = "N/A"
+            all_rows.append(fcf_row)
+            
+            # Create compact toggle buttons
+            parent_names = list(hierarchy.keys())
+            button_cols = st.columns(len(parent_names))
+            
+            for idx, parent_name in enumerate(parent_names):
+                with button_cols[idx]:
+                    is_expanded = parent_name in st.session_state.expanded_cashflow_parents
+                    arrow = "▼" if is_expanded else "▶"
+                    # Button with arrow and parent name
+                    if st.button(f"{arrow} {parent_name}", key=f"toggle_cashflow_{parent_name}"):
+                        if parent_name in st.session_state.expanded_cashflow_parents:
+                            st.session_state.expanded_cashflow_parents.remove(parent_name)
+                        else:
+                            st.session_state.expanded_cashflow_parents.add(parent_name)
+                        st.rerun()
+            
+            # Create and display unified dataframe
+            df_cashflow_display = pd.DataFrame(all_rows)
+            display_cols = ['Metric'] + years
+            df_cashflow_display = df_cashflow_display[display_cols]
+            
+            st.dataframe(
+                df_cashflow_display,
+                use_container_width=True,
+                hide_index=True,
+                height=min(800, len(all_rows) * 35 + 50)
+            )
+            
+            st.caption("💡 Data sourced from MotherDuck: pwb_stockscashflow | Free Cash Flow = Operating Cash Flow + Capital Expenditures")
+        else:
+            st.warning(f"⚠️ No cash flow data available for {current_ticker}")
         
     else:
         st.error(f"❌ No data found for ticker '{current_ticker}' in MotherDuck database.")
