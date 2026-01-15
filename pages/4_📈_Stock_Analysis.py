@@ -1926,7 +1926,7 @@ if current_ticker:
             </table>
             """
             
-            st.markdown(html, unsafe_allow_html=True)
+            st.html(html)
             
             st.caption("💡 Percentiles show where current ratio falls within sector/historical range. Red (0-40%): Below average, Orange (40-70%): Average, Green (70-100%): Above average")
             st.caption("⚠️ Note: Percentile calculations are placeholders (50%) in this version. Full implementation coming soon.")
