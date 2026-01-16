@@ -1569,6 +1569,152 @@ def get_valuation_ratios(ticker):
         st.error(f"Error calculating valuation ratios: {str(e)}")
         return None
 
+def create_composite_scores_radar(ticker):
+    """
+    Create radar chart showing composite scores over time (last 4 years)
+    Each subplot shows 6 quality dimensions: Profitability, Quality, Growth, 
+    Financial Strength, Value, Momentum
+    """
+    import duckdb
+    import pandas as pd
+    import numpy as np
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    
+    try:
+        # Connect to MotherDuck
+        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        
+        # Query to get last 4 years of data (most recent date per year)
+        query = f"""
+        WITH yearly_data AS (
+            SELECT 
+                symbol,
+                calculation_date,
+                EXTRACT(YEAR FROM calculation_date) as year,
+                obq_profit_rank as profitability,
+                OBQ_Quality_Rank as quality,
+                obq_growth_score as growth,
+                obq_finstr_score as financial_strength,
+                obq_value_score as value,
+                obq_momentum_score as momentum,
+                obq_composite_score,
+                ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM calculation_date) ORDER BY calculation_date DESC) as rn
+            FROM my_db.main.OBQ_Scores
+            WHERE symbol = '{ticker}'
+            AND EXTRACT(YEAR FROM calculation_date) >= EXTRACT(YEAR FROM CURRENT_DATE) - 3
+        )
+        SELECT *
+        FROM yearly_data
+        WHERE rn = 1
+        ORDER BY year DESC
+        LIMIT 4
+        """
+        
+        scores_df = conn.execute(query).df()
+        conn.close()
+        
+        if scores_df.empty:
+            return None
+        
+        # Prepare subplot titles with composite scores
+        subplot_titles = []
+        for _, row in scores_df.iterrows():
+            year = int(row['year'])
+            composite = row['obq_composite_score'] if pd.notna(row['obq_composite_score']) else 0
+            subplot_titles.append(f"<b>{year}</b><br>Composite: {composite:.1f}")
+        
+        # Create subplots with proper spacing
+        num_years = len(scores_df)
+        fig = make_subplots(
+            rows=1, cols=num_years,
+            specs=[[{'type': 'scatterpolar'}] * num_years],
+            subplot_titles=subplot_titles,
+            horizontal_spacing=0.05,
+            vertical_spacing=0.1
+        )
+        
+        # Categories for radar chart
+        categories = ['Profitability', 'Quality', 'Growth', 'Financial<br>Strength', 'Value', 'Momentum']
+        
+        # Add traces for each year
+        for idx, (_, row) in enumerate(scores_df.iterrows()):
+            col = idx + 1
+            year = int(row['year'])
+            
+            # Normalize values to 0-10 scale, set to 0 if not available
+            values = [
+                row['profitability'] / 10 if pd.notna(row['profitability']) else 0,
+                row['quality'] / 10 if pd.notna(row['quality']) else 0,
+                row['growth'] / 10 if pd.notna(row['growth']) else 0,
+                row['financial_strength'] / 10 if pd.notna(row['financial_strength']) else 0,
+                row['value'] / 10 if pd.notna(row['value']) else 0,
+                row['momentum'] / 10 if pd.notna(row['momentum']) else 0,
+            ]
+            
+            # Close the polygon
+            values_closed = values + [values[0]]
+            categories_closed = categories + [categories[0]]
+            
+            # Add trace
+            fig.add_trace(
+                go.Scatterpolar(
+                    r=values_closed,
+                    theta=categories_closed,
+                    fill='toself',
+                    fillcolor='rgba(46, 125, 50, 0.5)',
+                    line=dict(color='rgb(46, 125, 50)', width=2),
+                    name=str(year),
+                    showlegend=False
+                ),
+                row=1, col=col
+            )
+            
+            # Update polar axes
+            fig.update_polars(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 10],
+                    tickmode='linear',
+                    tick0=0,
+                    dtick=2,
+                    showticklabels=True,
+                    tickfont=dict(size=8)
+                ),
+                angularaxis=dict(
+                    tickfont=dict(size=9)
+                ),
+                row=1, col=col
+            )
+        
+        # Update layout for full width and proper spacing
+        fig.update_layout(
+            title=dict(
+                text=f"{ticker} - Quality Scores: 4-Year History",
+                x=0.5,
+                xanchor='center',
+                y=0.98,
+                yanchor='top',
+                font=dict(size=16, color='black')
+            ),
+            height=450,
+            showlegend=False,
+            paper_bgcolor='white',
+            plot_bgcolor='white',
+            margin=dict(t=80, b=40, l=40, r=40)
+        )
+        
+        # Update annotation font sizes
+        for annotation in fig['layout']['annotations']:
+            annotation['font'] = dict(size=11)
+            annotation['y'] = annotation['y'] - 0.02
+        
+        return fig
+    
+    except Exception as e:
+        st.error(f"Error creating composite scores radar: {str(e)}")
+        return None
+
 # Header with logo and title
 col1, col2 = st.columns([1, 4])
 with col1:
@@ -2249,6 +2395,20 @@ if current_ticker:
             st.caption("🎨 **Color coding:** Red (0-40%): Relatively cheap, Orange (40-70%): Average valuation, Green (70-100%): Relatively expensive")
         else:
             st.warning(f"⚠️ No valuation ratio data available for {current_ticker}")
+        
+        st.markdown("---")
+        
+        # Composite Scores Radar Chart Section
+        st.subheader("🎯 Quality Scores: 4-Year History")
+        
+        with st.spinner("Loading composite scores..."):
+            radar_fig = create_composite_scores_radar(current_ticker)
+        
+        if radar_fig:
+            st.plotly_chart(radar_fig, use_container_width=True)
+            st.caption("📊 **Composite Scores**: Each radar chart shows 6 quality dimensions (Profitability, Quality, Growth, Financial Strength, Value, Momentum) on a 0-10 scale. The composite score combines all dimensions into a single overall rating.")
+        else:
+            st.warning(f"⚠️ No composite score data available for {current_ticker}")
         
     else:
         st.error(f"❌ No data found for ticker '{current_ticker}' in MotherDuck database.")
