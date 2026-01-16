@@ -1274,16 +1274,288 @@ def get_valuation_ratios(ticker):
             'P/Owners Earnings': current_market_cap / free_cash_flow_ttm if free_cash_flow_ttm > 0 else np.nan
         }
         
-        # Simplified percentile calculation (for performance)
+        # Helper function to calculate percentile
+        def calc_percentile(current_value, min_value, max_value):
+            """Calculate percentile rank (0-100) of current value within range"""
+            if pd.isna(current_value) or pd.isna(min_value) or pd.isna(max_value):
+                return np.nan
+            if max_value == min_value:
+                return 50.0
+            percentile = ((current_value - min_value) / (max_value - min_value)) * 100
+            return max(0, min(100, percentile))
+        
+        # Get historical data for the ticker
+        df_income_hist = conn.execute(f"""
+            SELECT date, total_revenue, net_income, ebitda
+            FROM my_db.main.pwb_stocksincomestatement
+            WHERE symbol = '{ticker}'
+            ORDER BY date ASC
+        """).df()
+        
+        df_balance_hist = conn.execute(f"""
+            SELECT date, total_shareholder_equity, total_liabilities, 
+                   cash_and_cash_equivalents_at_carrying_value, short_term_investments,
+                   common_stock_shares_outstanding
+            FROM my_db.main.pwb_stocksbalancesheet
+            WHERE symbol = '{ticker}'
+            ORDER BY date ASC
+        """).df()
+        
+        df_cashflow_hist = conn.execute(f"""
+            SELECT date, operating_cashflow, capital_expenditures
+            FROM my_db.main.pwb_stockscashflow
+            WHERE symbol = '{ticker}'
+            ORDER BY date ASC
+        """).df()
+        
+        df_earnings_hist = conn.execute(f"""
+            SELECT date, reported_eps
+            FROM my_db.main.pwb_stocksearnings
+            WHERE symbol = '{ticker}'
+            ORDER BY date ASC
+        """).df()
+        
+        df_prices_hist = conn.execute(f"""
+            SELECT Date as date, Close as price
+            FROM my_db.main.norgate_survivorship_bias_free_database
+            WHERE Symbol = '{ticker}'
+            ORDER BY Date ASC
+        """).df()
+        
+        # Convert dates
+        for df in [df_income_hist, df_balance_hist, df_cashflow_hist, df_earnings_hist, df_prices_hist]:
+            df['date'] = pd.to_datetime(df['date'])
+        
+        # Function to calculate historical percentile
+        def calc_historical_percentile(ratio_name, current_value):
+            """Calculate where current ratio falls in stock's historical range"""
+            if pd.isna(current_value):
+                return np.nan
+            
+            # Merge all historical data
+            hist_merged = df_income_hist.merge(df_balance_hist, on='date', how='inner')
+            hist_merged = hist_merged.merge(df_cashflow_hist, on='date', how='inner')
+            hist_merged = hist_merged.merge(df_earnings_hist, on='date', how='inner')
+            
+            if hist_merged.empty or len(hist_merged) < 4:
+                return np.nan
+            
+            hist_ratios = []
+            
+            # Calculate rolling TTM ratios for each quarter
+            for i in range(3, len(hist_merged)):
+                ttm_data = hist_merged.iloc[i-3:i+1]
+                quarter_date = ttm_data['date'].iloc[-1]
+                
+                # Get price on or shortly after this quarter date
+                price_match = df_prices_hist[df_prices_hist['date'] >= quarter_date]
+                if price_match.empty:
+                    continue
+                price = price_match['price'].iloc[0]
+                
+                # Get shares outstanding for this quarter
+                shares = ttm_data['common_stock_shares_outstanding'].iloc[-1]
+                if pd.isna(shares) or shares <= 0:
+                    continue
+                
+                # Calculate market cap and enterprise value for this period
+                market_cap_hist = price * shares
+                
+                # Calculate TTM metrics
+                rev_ttm = ttm_data['total_revenue'].sum()
+                eb_ttm = ttm_data['ebitda'].sum()
+                eps_ttm = ttm_data['reported_eps'].sum()
+                ocf_ttm = ttm_data['operating_cashflow'].sum()
+                cx_ttm = ttm_data['capital_expenditures'].sum()
+                fcf_ttm = ocf_ttm + cx_ttm
+                
+                # Latest quarter balance sheet values
+                eq = ttm_data['total_shareholder_equity'].iloc[-1]
+                debt = ttm_data['total_liabilities'].iloc[-1]
+                cash_val = ttm_data['cash_and_cash_equivalents_at_carrying_value'].iloc[-1]
+                st_inv = ttm_data['short_term_investments'].iloc[-1]
+                st_inv = st_inv if not pd.isna(st_inv) else 0
+                
+                # Calculate enterprise value
+                ev_hist = market_cap_hist + debt - (cash_val + st_inv)
+                
+                # Calculate ratio based on ratio_name
+                if ratio_name == 'PE':
+                    ratio = price / eps_ttm if eps_ttm > 0 else np.nan
+                elif ratio_name == 'EV/EBITDA':
+                    ratio = ev_hist / eb_ttm if eb_ttm > 0 else np.nan
+                elif ratio_name == 'P/Sales':
+                    ratio = market_cap_hist / rev_ttm if rev_ttm > 0 else np.nan
+                elif ratio_name == 'EV/Revenue':
+                    ratio = ev_hist / rev_ttm if rev_ttm > 0 else np.nan
+                elif ratio_name == 'P/FCF':
+                    ratio = market_cap_hist / fcf_ttm if fcf_ttm > 0 else np.nan
+                elif ratio_name == 'P/BV':
+                    ratio = market_cap_hist / eq if eq > 0 else np.nan
+                elif ratio_name == 'P/TBV':
+                    ratio = market_cap_hist / eq if eq > 0 else np.nan
+                elif ratio_name == 'P/Owners Earnings':
+                    ratio = market_cap_hist / fcf_ttm if fcf_ttm > 0 else np.nan
+                else:
+                    ratio = np.nan
+                
+                if not pd.isna(ratio) and ratio > 0 and ratio < 1000:
+                    hist_ratios.append(ratio)
+            
+            if len(hist_ratios) < 2:
+                return np.nan
+            
+            min_hist = min(hist_ratios)
+            max_hist = max(hist_ratios)
+            
+            return calc_percentile(current_value, min_hist, max_hist)
+        
+        # Function to calculate sector percentile
+        def calc_sector_percentile(ratio_name, current_value):
+            """Calculate where current ratio falls in sector range"""
+            if pd.isna(current_value):
+                return np.nan
+            
+            sector_ratios = []
+            
+            # Process sector peers (limit to 100 for performance)
+            for sym in sector_symbols[:100]:
+                if sym == ticker:
+                    continue
+                    
+                try:
+                    # Get current price from norgate
+                    sym_price_df = conn.execute(f"""
+                        SELECT Close as price
+                        FROM my_db.main.norgate_survivorship_bias_free_database
+                        WHERE Symbol = '{sym}'
+                        ORDER BY Date DESC
+                        LIMIT 1
+                    """).df()
+                    
+                    if sym_price_df.empty:
+                        continue
+                    sym_price = sym_price_df['price'].iloc[0]
+                    
+                    # Get latest balance sheet for shares and debt/cash
+                    sym_balance = conn.execute(f"""
+                        SELECT common_stock_shares_outstanding, total_shareholder_equity,
+                               total_liabilities, cash_and_cash_equivalents_at_carrying_value,
+                               short_term_investments
+                        FROM my_db.main.pwb_stocksbalancesheet
+                        WHERE symbol = '{sym}'
+                        ORDER BY date DESC LIMIT 1
+                    """).df()
+                    
+                    if sym_balance.empty:
+                        continue
+                    
+                    sym_shares = sym_balance['common_stock_shares_outstanding'].iloc[0]
+                    sym_eq = sym_balance['total_shareholder_equity'].iloc[0]
+                    sym_debt = sym_balance['total_liabilities'].iloc[0]
+                    sym_cash = sym_balance['cash_and_cash_equivalents_at_carrying_value'].iloc[0]
+                    sym_st_inv = sym_balance['short_term_investments'].iloc[0]
+                    sym_st_inv = sym_st_inv if not pd.isna(sym_st_inv) else 0
+                    
+                    if pd.isna(sym_shares) or sym_shares <= 0:
+                        continue
+                    
+                    sym_mc = sym_price * sym_shares
+                    sym_ev = sym_mc + sym_debt - (sym_cash + sym_st_inv)
+                    
+                    # Get TTM financials
+                    sym_income_ttm = conn.execute(f"""
+                        SELECT 
+                            SUM(total_revenue) as total_revenue,
+                            SUM(net_income) as net_income,
+                            SUM(ebitda) as ebitda
+                        FROM (
+                            SELECT total_revenue, net_income, ebitda
+                            FROM my_db.main.pwb_stocksincomestatement
+                            WHERE symbol = '{sym}'
+                            ORDER BY date DESC
+                            LIMIT 4
+                        )
+                    """).df()
+                    
+                    sym_cashflow_ttm = conn.execute(f"""
+                        SELECT 
+                            SUM(operating_cashflow) as operating_cashflow,
+                            SUM(capital_expenditures) as capital_expenditures
+                        FROM (
+                            SELECT operating_cashflow, capital_expenditures
+                            FROM my_db.main.pwb_stockscashflow
+                            WHERE symbol = '{sym}'
+                            ORDER BY date DESC
+                            LIMIT 4
+                        )
+                    """).df()
+                    
+                    sym_earnings_ttm = conn.execute(f"""
+                        SELECT SUM(reported_eps) as ttm_eps
+                        FROM (
+                            SELECT reported_eps
+                            FROM my_db.main.pwb_stocksearnings
+                            WHERE symbol = '{sym}'
+                            ORDER BY date DESC
+                            LIMIT 4
+                        )
+                    """).df()
+                    
+                    if sym_income_ttm.empty or sym_cashflow_ttm.empty or sym_earnings_ttm.empty:
+                        continue
+                    
+                    rev_ttm = sym_income_ttm['total_revenue'].iloc[0]
+                    eb_ttm = sym_income_ttm['ebitda'].iloc[0]
+                    ocf_ttm = sym_cashflow_ttm['operating_cashflow'].iloc[0]
+                    cx_ttm = sym_cashflow_ttm['capital_expenditures'].iloc[0]
+                    fcf_ttm = ocf_ttm + cx_ttm
+                    eps_ttm = sym_earnings_ttm['ttm_eps'].iloc[0]
+                    
+                    # Calculate ratio
+                    if ratio_name == 'PE':
+                        ratio = sym_price / eps_ttm if eps_ttm > 0 else np.nan
+                    elif ratio_name == 'EV/EBITDA':
+                        ratio = sym_ev / eb_ttm if eb_ttm > 0 else np.nan
+                    elif ratio_name == 'P/Sales':
+                        ratio = sym_mc / rev_ttm if rev_ttm > 0 else np.nan
+                    elif ratio_name == 'EV/Revenue':
+                        ratio = sym_ev / rev_ttm if rev_ttm > 0 else np.nan
+                    elif ratio_name == 'P/FCF':
+                        ratio = sym_mc / fcf_ttm if fcf_ttm > 0 else np.nan
+                    elif ratio_name == 'P/BV':
+                        ratio = sym_mc / sym_eq if sym_eq > 0 else np.nan
+                    elif ratio_name == 'P/TBV':
+                        ratio = sym_mc / sym_eq if sym_eq > 0 else np.nan
+                    elif ratio_name == 'P/Owners Earnings':
+                        ratio = sym_mc / fcf_ttm if fcf_ttm > 0 else np.nan
+                    else:
+                        ratio = np.nan
+                    
+                    if not pd.isna(ratio) and ratio > 0 and ratio < 1000:
+                        sector_ratios.append(ratio)
+                except:
+                    continue
+            
+            if len(sector_ratios) < 2:
+                return np.nan
+            
+            min_sector = min(sector_ratios)
+            max_sector = max(sector_ratios)
+            
+            return calc_percentile(current_value, min_sector, max_sector)
+        
+        # Calculate percentiles for all ratios
         results = []
         for ratio_name, current_value in ratios_data.items():
-            # For now, return placeholder percentiles
-            # Full calculation would query historical and sector data
+            sector_pct = calc_sector_percentile(ratio_name, current_value)
+            history_pct = calc_historical_percentile(ratio_name, current_value)
+            
             results.append({
                 'name': ratio_name,
                 'current_value': current_value,
-                'sector_percentile': 50.0,  # Placeholder
-                'history_percentile': 50.0   # Placeholder
+                'sector_percentile': sector_pct,
+                'history_percentile': history_pct
             })
         
         conn.close()
