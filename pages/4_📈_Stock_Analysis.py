@@ -2129,6 +2129,43 @@ if current_ticker:
             .progress-gray {
                 background-color: #cccccc;
             }
+            .tooltip {
+                position: relative;
+                display: inline-block;
+                cursor: help;
+            }
+            .tooltip .tooltiptext {
+                visibility: hidden;
+                width: 300px;
+                background-color: #262730;
+                color: #fff;
+                text-align: left;
+                border-radius: 6px;
+                padding: 10px;
+                position: absolute;
+                z-index: 1;
+                bottom: 125%;
+                left: 50%;
+                margin-left: -150px;
+                opacity: 0;
+                transition: opacity 0.3s;
+                font-size: 13px;
+                line-height: 1.4;
+            }
+            .tooltip .tooltiptext::after {
+                content: "";
+                position: absolute;
+                top: 100%;
+                left: 50%;
+                margin-left: -5px;
+                border-width: 5px;
+                border-style: solid;
+                border-color: #262730 transparent transparent transparent;
+            }
+            .tooltip:hover .tooltiptext {
+                visibility: visible;
+                opacity: 1;
+            }
             </style>
             
             <table class="valuation-table">
@@ -2136,8 +2173,16 @@ if current_ticker:
                     <tr>
                         <th style="width: 25%;">Name</th>
                         <th style="width: 15%;">Current</th>
-                        <th style="width: 30%;">Vs Sector</th>
-                        <th style="width: 30%;">Vs History</th>
+                        <th style="width: 30%;">
+                            <div class="tooltip">Vs Sector ℹ️
+                                <span class="tooltiptext"><strong>Sector Comparison:</strong><br/>Shows where this stock's valuation falls within its sector.<br/><br/><strong>Higher % = More Expensive</strong><br/>• 80% means more expensive than 80% of sector peers<br/>• 20% means cheaper than 80% of sector peers</span>
+                            </div>
+                        </th>
+                        <th style="width: 30%;">
+                            <div class="tooltip">Vs History ℹ️
+                                <span class="tooltiptext"><strong>Historical Comparison:</strong><br/>Shows where current valuation falls in this stock's own history.<br/><br/><strong>Higher % = More Expensive</strong><br/>• 80% means more expensive than 80% of its historical range<br/>• 20% means cheaper than 80% of its historical range</span>
+                            </div>
+                        </th>
                     </tr>
                 </thead>
                 <tbody>
@@ -2200,8 +2245,8 @@ if current_ticker:
             
             st.html(html)
             
-            st.caption("💡 Percentiles show where current ratio falls within sector/historical range. Red (0-40%): Below average, Orange (40-70%): Average, Green (70-100%): Above average")
-            st.caption("⚠️ Note: Percentile calculations are placeholders (50%) in this version. Full implementation coming soon.")
+            st.caption("💡 **How to read percentiles:** Higher % = More Expensive. For example, if P/E shows 80% vs Sector, the stock is more expensive than 80% of its sector peers. If it shows 20%, it's cheaper than 80% of peers.")
+            st.caption("🎨 **Color coding:** Red (0-40%): Relatively cheap, Orange (40-70%): Average valuation, Green (70-100%): Relatively expensive")
         else:
             st.warning(f"⚠️ No valuation ratio data available for {current_ticker}")
         
