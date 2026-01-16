@@ -151,7 +151,8 @@ Ratio: {latest['BPSP_Ratio']:.4f}"""
     )
     
     # Add fill between BP and SP
-    # Green fill when BP > SP
+    # Use a simple approach: fill between the two lines
+    # The color will blend based on which is higher
     fig.add_trace(
         go.Scatter(
             x=df['Date'],
@@ -160,7 +161,8 @@ Ratio: {latest['BPSP_Ratio']:.4f}"""
             mode='lines',
             line_color='rgba(0,0,0,0)',
             showlegend=False,
-            hoverinfo='skip'
+            hoverinfo='skip',
+            name='BP_fill'
         ),
         row=2, col=1
     )
@@ -170,13 +172,25 @@ Ratio: {latest['BPSP_Ratio']:.4f}"""
             x=df['Date'],
             y=df['Selling_Pressure'],
             fill='tonexty',
-            fillcolor='rgba(0, 255, 0, 0.2)',
+            fillcolor='rgba(0, 200, 0, 0.15)',
             mode='lines',
             line_color='rgba(0,0,0,0)',
             showlegend=False,
-            hoverinfo='skip'
+            hoverinfo='skip',
+            name='SP_fill'
         ),
         row=2, col=1
+    )
+    
+    # Customize candlestick hover
+    fig.update_traces(
+        hovertemplate='<b>Date</b>: %{x|%Y-%m-%d}<br>' +
+                      '<b>Open</b>: %{open:,.2f}<br>' +
+                      '<b>High</b>: %{high:,.2f}<br>' +
+                      '<b>Low</b>: %{low:,.2f}<br>' +
+                      '<b>Close</b>: %{close:,.2f}<br>' +
+                      '<extra></extra>',
+        selector=dict(type='candlestick')
     )
     
     # Update layout
@@ -186,7 +200,8 @@ Ratio: {latest['BPSP_Ratio']:.4f}"""
         hovermode='x unified',
         paper_bgcolor='white',
         plot_bgcolor='white',
-        margin=dict(t=80, b=80, l=60, r=60)
+        margin=dict(t=80, b=80, l=60, r=60),
+        xaxis_rangeslider_visible=False  # Hide rangeslider for cleaner look
     )
     
     # Update axes
