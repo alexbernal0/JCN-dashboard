@@ -1602,7 +1602,7 @@ def create_composite_scores_radar(ticker):
                 ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM calculation_date) ORDER BY calculation_date DESC) as rn
             FROM my_db.main.OBQ_Scores
             WHERE symbol = '{ticker}'
-            AND EXTRACT(YEAR FROM calculation_date) >= EXTRACT(YEAR FROM CURRENT_DATE) - 3
+            AND EXTRACT(YEAR FROM calculation_date) >= EXTRACT(YEAR FROM CURRENT_DATE) - 4
         )
         SELECT *
         FROM yearly_data
