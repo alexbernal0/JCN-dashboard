@@ -51,13 +51,13 @@ CACHE_FILE = "portfolio_cache.json"
 NEWS_CACHE_FILE = "news_cache.json"
 SUMMARY_CACHE_FILE = "portfolio_summary_cache.json"
 
-# API Keys for news aggregation (using Streamlit secrets)
-# Configure these in Streamlit Cloud: Settings > Secrets
+# API Keys for news aggregation (using Railway environment variables)
 try:
-    FINNHUB_API_KEY = st.secrets["FINNHUB_API_KEY"]
-    GROK_API_KEY = st.secrets["GROK_API_KEY"]
+    FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
+    GROK_API_KEY = os.getenv("GROK_API_KEY")
+    if not FINNHUB_API_KEY or not GROK_API_KEY:
+        st.warning("⚠️ API keys not configured. Add FINNHUB_API_KEY and GROK_API_KEY to Railway environment variables for news features.")
 except Exception as e:
-    st.error("⚠️ API keys not configured. Please add FINNHUB_API_KEY and GROK_API_KEY to Streamlit secrets.")
     FINNHUB_API_KEY = None
     GROK_API_KEY = None
 
@@ -182,12 +182,12 @@ if 'selected_period' not in st.session_state:
 # Extract valid tickers from current portfolio data
 tickers = [ticker.strip().upper() for ticker in st.session_state.portfolio_data['Symbol'].dropna().tolist() if ticker.strip()]
 
-# Helper function to get comprehensive stock data with rate limiting
+# Helper function to get comprehensive stock data with caching
+@st.cache_data(ttl=300, show_spinner=False)  # Cache for 5 minutes
 def get_comprehensive_stock_data(ticker):
-    """Get all required stock data from yfinance with rate limiting"""
+    """Get all required stock data from yfinance (cached for 5 minutes)"""
     try:
-        # Add delay to avoid rate limiting (0.5 seconds between requests)
-        time.sleep(0.5)
+        # Rate limiting removed - only fetches on cache miss
         
         stock = yf.Ticker(ticker)
         info = stock.info
@@ -701,10 +701,21 @@ def get_portfolio_aggregated_metrics(fundamentals_df):
         st.error(f"Error calculating aggregated metrics: {str(e)}")
         return None
 
+# Cached MotherDuck connection (singleton pattern)
+@st.cache_resource
+def get_motherduck_connection():
+    """Create a singleton MotherDuck connection shared across all users"""
+    motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
+    if not motherduck_token:
+        raise ValueError("MOTHERDUCK_TOKEN not configured in Railway environment")
+    return duckdb.connect(f'md:?motherduck_token={motherduck_token}')
+
+@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
 def get_fundamentals_from_motherduck(tickers, portfolio_df):
     """
     Fetch fundamental metrics from MotherDuck database for portfolio stocks.
     Uses SELECT * and accesses columns directly in pandas to avoid SQL escaping issues.
+    Cached for 1 hour as fundamental data changes infrequently.
     
     Parameters:
     -----------
@@ -719,12 +730,6 @@ def get_fundamentals_from_motherduck(tickers, portfolio_df):
         Fundamentals scorecard with all metrics (NaN filled with appropriate defaults)
     """
     try:
-        # Get MotherDuck token from environment
-        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
-        if not motherduck_token:
-            st.warning("MotherDuck token not configured. Fundamentals table unavailable.")
-            return None
-        
         # Filter out empty tickers and prepare for SQL
         valid_tickers = [t.strip().upper() for t in tickers if t and t.strip()]
         if not valid_tickers:
@@ -732,8 +737,8 @@ def get_fundamentals_from_motherduck(tickers, portfolio_df):
         
         symbols_str = "', '".join(valid_tickers)
         
-        # Connect to MotherDuck
-        conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
+        # Get cached connection
+        conn = get_motherduck_connection()
         
         # Get all data with SELECT * and join with latest OBQ scores
         query = f"""
@@ -787,7 +792,7 @@ def get_fundamentals_from_motherduck(tickers, portfolio_df):
         
         # Execute query
         result = conn.execute(query).df()
-        conn.close()
+        # Note: Don't close connection - it's shared across all users
         
         if result.empty:
             st.warning("No data found in MotherDuck for portfolio stocks.")
@@ -919,11 +924,6 @@ def create_portfolio_radar_charts(tickers):
     Color intensity based on relative composite scores (heatmap style).
     """
     try:
-        # Get MotherDuck token
-        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
-        if not motherduck_token:
-            return None
-        
         # Filter out empty tickers and SPMO
         valid_tickers = [t.strip().upper() for t in tickers if t and t.strip() and t.strip().upper() != 'SPMO']
         if not valid_tickers:
@@ -931,8 +931,8 @@ def create_portfolio_radar_charts(tickers):
         
         symbols_str = "', '".join(valid_tickers)
         
-        # Connect to MotherDuck
-        conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
+        # Get cached MotherDuck connection
+        conn = get_motherduck_connection()
         
         # Get GuruFocus data for all symbols
         data = conn.execute(f"""
@@ -940,7 +940,7 @@ def create_portfolio_radar_charts(tickers):
             WHERE Symbol IN ('{symbols_str}')
         """).df()
         
-        conn.close()
+        # Note: Don't close connection - it's shared
         
         if data.empty:
             return None
@@ -1197,22 +1197,18 @@ def create_portfolio_trends_charts(tickers):
     Each stock gets 2 rows: candlestick chart on top, drawdown chart below.
     """
     try:
-        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
-        if not motherduck_token:
-            return None
-        
         # Filter valid tickers
         valid_tickers = [t.strip().upper() for t in tickers if t and t.strip() and t.strip().upper() != 'SPMO']
         if not valid_tickers:
             return None
         
-        # Connect to MotherDuck
-        conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
+        # Get cached MotherDuck connection
+        conn = get_motherduck_connection()
         
         # Fetch 8 years of data
         price_data = fetch_weekly_data(conn, valid_tickers, years=8)
         
-        conn.close()
+        # Note: Don't close connection - it's shared
         
         if price_data.empty:
             return None
@@ -2314,23 +2310,23 @@ try:
     
     # Check if it's Friday after 5 PM
     if now_est.weekday() == 4 and now_est.hour >= 17:  # Friday = 4
-        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
-        if motherduck_token and tickers:
-            conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
-            last_refresh = get_last_refresh_time(conn)
-            
-            # Only auto-refresh if last refresh was before this Friday 5 PM
-            if last_refresh:
-                last_refresh_est = last_refresh.astimezone(est)
-                friday_5pm = now_est.replace(hour=17, minute=0, second=0, microsecond=0)
+        if tickers:
+            try:
+                conn = get_motherduck_connection()
+                last_refresh = get_last_refresh_time(conn)
                 
-                if last_refresh_est < friday_5pm:
-                    # Auto-refresh needed
-                    success, failed, total_rows = update_weekly_data(conn, tickers)
-                    if total_rows > 0:
-                        st.success(f"✅ Auto-refreshed {success} stocks ({total_rows} new weeks) - Friday 5 PM EST")
-            
-            conn.close()
+                # Only auto-refresh if last refresh was before this Friday 5 PM
+                if last_refresh:
+                    last_refresh_est = last_refresh.astimezone(est)
+                    friday_5pm = now_est.replace(hour=17, minute=0, second=0, microsecond=0)
+                    
+                    if last_refresh_est < friday_5pm:
+                        # Auto-refresh needed
+                        success, failed, total_rows = update_weekly_data(conn, tickers)
+                        if total_rows > 0:
+                            st.success(f"✅ Auto-refreshed {success} stocks ({total_rows} new weeks) - Friday 5 PM EST")
+            except:
+                pass
 except:
     pass
 
@@ -2341,16 +2337,13 @@ with col1:
     
     # Get last refresh time
     try:
-        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
-        if motherduck_token:
-            conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
-            last_refresh = get_last_refresh_time(conn)
-            conn.close()
-            
-            if last_refresh:
-                st.caption(f"🕒 Last data refresh: {last_refresh.strftime('%Y-%m-%d %I:%M %p EST')}")
-            else:
-                st.caption("⚠️ No data found - please run initial data population script")
+        conn = get_motherduck_connection()
+        last_refresh = get_last_refresh_time(conn)
+        
+        if last_refresh:
+            st.caption(f"🕒 Last data refresh: {last_refresh.strftime('%Y-%m-%d %I:%M %p EST')}")
+        else:
+            st.caption("⚠️ No data found - please run initial data population script")
     except:
         pass
 
@@ -2358,16 +2351,13 @@ with col2:
     if st.button("🔄 Refresh Data", use_container_width=True, key="refresh_trends_data"):
         with st.spinner("Updating weekly data..."):
             try:
-                motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
-                if motherduck_token:
-                    conn = duckdb.connect(f'md:?motherduck_token={motherduck_token}')
-                    success, failed, total_rows = update_weekly_data(conn, tickers)
-                    conn.close()
-                    
-                    if total_rows > 0:
-                        st.success(f"✅ Updated {success} stocks ({total_rows} new weeks)")
-                    else:
-                        st.info("✅ Data is already up to date")
+                conn = get_motherduck_connection()
+                success, failed, total_rows = update_weekly_data(conn, tickers)
+                
+                if total_rows > 0:
+                    st.success(f"✅ Updated {success} stocks ({total_rows} new weeks)")
+                else:
+                    st.info("✅ Data is already up to date")
                     
                     if failed > 0:
                         st.warning(f"⚠️ {failed} stocks failed to update")

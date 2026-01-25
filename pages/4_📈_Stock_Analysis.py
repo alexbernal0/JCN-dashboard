@@ -14,14 +14,21 @@ st.set_page_config(
     layout="wide"
 )
 
-# MotherDuck connection
-MOTHERDUCK_TOKEN = os.getenv('MOTHERDUCK_TOKEN')
+# Cached MotherDuck connection (singleton pattern)
+@st.cache_resource
+def get_motherduck_connection():
+    """Create a singleton MotherDuck connection shared across all users"""
+    motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
+    if not motherduck_token:
+        raise ValueError("MOTHERDUCK_TOKEN not configured in Railway environment")
+    return duckdb.connect(f'md:?motherduck_token={motherduck_token}')
 
+@st.cache_data(ttl=1800, show_spinner=False)  # Cache for 30 minutes
 def get_stock_info_from_motherduck(ticker):
-    """Get stock information from MotherDuck"""
+    """Get stock information from MotherDuck (cached for 30 minutes)"""
     try:
-        # Connect to MotherDuck
-        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        # Get cached connection
+        conn = get_motherduck_connection()
         
         # Query for stock info combining gurufocus and price data
         query = f"""
@@ -45,7 +52,7 @@ def get_stock_info_from_motherduck(ticker):
         """
         
         result = conn.execute(query).fetchdf()
-        conn.close()
+        # Note: Don't close connection - it's shared
         
         if not result.empty:
             return {
@@ -106,7 +113,7 @@ def classify_trend(cagr_selected, cagr_1yr, cagr_3yr, cagr_5yr):
 def create_financial_overview_grid(ticker, time_period='10yr'):
     """Create 2x2 grid of financial charts with CAGR and trend analysis"""
     try:
-        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        conn = get_motherduck_connection()
         
         # Determine time window
         end_date = datetime.now()
@@ -169,7 +176,7 @@ def create_financial_overview_grid(ticker, time_period='10yr'):
             ORDER BY date
         """).df()
         
-        conn.close()
+        # Note: Don't close connection - it's shared
         
         # Merge all data sources
         df_metrics = df_income.merge(df_balance, on='fiscal_year_end', how='left')
@@ -314,7 +321,7 @@ def create_financial_overview_grid(ticker, time_period='10yr'):
 def get_per_share_data(ticker):
     """Get 10-year fiscal year per share metrics from MotherDuck"""
     try:
-        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        conn = get_motherduck_connection()
         
         # Fetch income statement data
         df_income = conn.execute(f"""
@@ -347,7 +354,7 @@ def get_per_share_data(ticker):
         """).df()
         
         if df_income.empty:
-            conn.close()
+            # Note: Don't close connection - it's shared
             return None
         
         # Convert dates
@@ -385,7 +392,7 @@ def get_per_share_data(ticker):
             else:
                 price_data.append({'date': date, 'price': np.nan})
         
-        conn.close()
+        # Note: Don't close connection - it's shared
         
         df_prices = pd.DataFrame(price_data)
         
@@ -459,7 +466,7 @@ def get_per_share_data(ticker):
 def get_quality_metrics(ticker):
     """Get 10-year fiscal year quality metrics and ratios from MotherDuck"""
     try:
-        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        conn = get_motherduck_connection()
         
         # Fetch income statement data
         df_income = conn.execute(f"""
@@ -492,7 +499,7 @@ def get_quality_metrics(ticker):
             LIMIT 50
         """).df()
         
-        conn.close()
+        # Note: Don't close connection - it's shared
         
         if df_income.empty:
             return None
@@ -604,7 +611,7 @@ def get_quality_metrics(ticker):
 def get_income_statement(ticker):
     """Get 10-year Income Statement data from MotherDuck with hierarchical structure"""
     try:
-        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        conn = get_motherduck_connection()
         
         # Fetch income statement data with all necessary fields
         df_income = conn.execute(f"""
@@ -638,7 +645,7 @@ def get_income_statement(ticker):
             LIMIT 50
         """).df()
         
-        conn.close()
+        # Note: Don't close connection - it's shared
         
         if df_income.empty:
             return None
@@ -763,7 +770,7 @@ def get_income_statement(ticker):
 def get_balance_sheet(ticker):
     """Get 10-year Balance Sheet data from MotherDuck with hierarchical structure"""
     try:
-        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        conn = get_motherduck_connection()
         
         # Fetch comprehensive balance sheet data (using verified column names)
         df_balance = conn.execute(f"""
@@ -802,7 +809,7 @@ def get_balance_sheet(ticker):
             LIMIT 50
         """).df()
         
-        conn.close()
+        # Note: Don't close connection - it's shared
         
         if df_balance.empty:
             return None
@@ -923,7 +930,7 @@ def get_balance_sheet(ticker):
 def get_cash_flows(ticker):
     """Get 10-year Cash Flows data from MotherDuck with hierarchical structure"""
     try:
-        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        conn = get_motherduck_connection()
         
         # Fetch cash flow data (only columns with consistent data)
         df_cashflow = conn.execute(f"""
@@ -943,7 +950,7 @@ def get_cash_flows(ticker):
             LIMIT 50
         """).df()
         
-        conn.close()
+        # Note: Don't close connection - it's shared
         
         if df_cashflow.empty:
             return None
@@ -1035,7 +1042,7 @@ def get_cash_flows(ticker):
 def get_growth_rates(ticker):
     """Calculate year-over-year growth rates for comprehensive financial metrics"""
     try:
-        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        conn = get_motherduck_connection()
         
         # Fetch income statement data
         df_income = conn.execute(f"""
@@ -1072,7 +1079,7 @@ def get_growth_rates(ticker):
             LIMIT 50
         """).df()
         
-        conn.close()
+        # Note: Don't close connection - it's shared
         
         if df_income.empty or df_balance.empty or df_cashflow.empty:
             return None
@@ -1168,7 +1175,7 @@ def get_valuation_ratios(ticker):
     
     try:
         # Connect to MotherDuck
-        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        conn = get_motherduck_connection()
         
         # Get current price
         current_price_df = conn.execute(f"""
@@ -1558,7 +1565,7 @@ def get_valuation_ratios(ticker):
                 'history_percentile': history_pct
             })
         
-        conn.close()
+        # Note: Don't close connection - it's shared
         
         return {
             'ratios': results,
@@ -1583,7 +1590,7 @@ def create_composite_scores_radar(ticker):
     
     try:
         # Connect to MotherDuck
-        conn = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        conn = get_motherduck_connection()
         
         # Query to get last 4 years of data (most recent date per year)
         query = f"""
@@ -1612,7 +1619,7 @@ def create_composite_scores_radar(ticker):
         """
         
         scores_df = conn.execute(query).df()
-        conn.close()
+        # Note: Don't close connection - it's shared
         
         if scores_df.empty:
             return None

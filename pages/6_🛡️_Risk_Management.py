@@ -14,16 +14,23 @@ st.set_page_config(
     layout="wide"
 )
 
-# MotherDuck connection
-MOTHERDUCK_TOKEN = os.getenv('MOTHERDUCK_TOKEN')
+# Cached MotherDuck connection (singleton pattern)
+@st.cache_resource
+def get_motherduck_connection():
+    """Create a singleton MotherDuck connection shared across all users"""
+    motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
+    if not motherduck_token:
+        raise ValueError("MOTHERDUCK_TOKEN not configured in Railway environment")
+    return duckdb.connect(f'md:?motherduck_token={motherduck_token}')
 
 # Years to display
 YEARS_TO_DISPLAY = 5
 
+@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
 def load_bpsp_data_full():
-    """Load full BPSP data including backtest metrics from MotherDuck"""
+    """Load full BPSP data including backtest metrics from MotherDuck (cached for 1 hour)"""
     try:
-        con = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        con = get_motherduck_connection()
         
         df = con.execute("""
             SELECT 
@@ -46,7 +53,7 @@ def load_bpsp_data_full():
             ORDER BY Date
         """).df()
         
-        con.close()
+        # Note: Don't close connection - it's shared
         
         # Convert date
         df['Date'] = pd.to_datetime(df['Date'])
@@ -57,10 +64,11 @@ def load_bpsp_data_full():
         st.error(f"Error loading data: {str(e)}")
         return None
 
+@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
 def load_bpsp_data():
-    """Load Buying Power / Selling Pressure data from MotherDuck"""
+    """Load Buying Power / Selling Pressure data from MotherDuck (cached for 1 hour)"""
     try:
-        con = duckdb.connect(f'md:?motherduck_token={MOTHERDUCK_TOKEN}')
+        con = get_motherduck_connection()
         
         df = con.execute("""
             SELECT 
@@ -76,7 +84,7 @@ def load_bpsp_data():
             ORDER BY Date
         """).df()
         
-        con.close()
+        # Note: Don't close connection - it's shared
         
         # Convert date and filter to last N years
         df['Date'] = pd.to_datetime(df['Date'])
