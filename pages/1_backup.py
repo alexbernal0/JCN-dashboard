@@ -19,8 +19,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Page configuration
 st.set_page_config(
-    page_title="Olivia Growth - JCN Dashboard",
-    page_icon="🌱",
+    page_title="Persistent Value - JCN Dashboard",
+    page_icon="📊",
     layout="wide"
 )
 
@@ -48,9 +48,9 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # Cache file paths
-CACHE_FILE = "olivia_portfolio_cache.json"
-NEWS_CACHE_FILE = "olivia_news_cache.json"
-SUMMARY_CACHE_FILE = "olivia_portfolio_summary_cache.json"
+CACHE_FILE = "portfolio_cache.json"
+NEWS_CACHE_FILE = "news_cache.json"
+SUMMARY_CACHE_FILE = "portfolio_summary_cache.json"
 
 # API Keys for news aggregation (using Railway environment variables)
 try:
@@ -87,7 +87,7 @@ def load_from_cache():
         st.warning(f"Could not load cache: {str(e)}")
         return None, None
 
-def save_to_csv_snapshot(data, portfolio_name="olivia_growth"):
+def save_to_csv_snapshot(data, portfolio_name="persistent_value"):
     """Save portfolio data to CSV snapshot for fallback"""
     try:
         df = pd.DataFrame(data)
@@ -100,7 +100,7 @@ def save_to_csv_snapshot(data, portfolio_name="olivia_growth"):
     except Exception as e:
         pass  # Silent fail for CSV snapshot
 
-def load_from_csv_snapshot(portfolio_name="olivia_growth"):
+def load_from_csv_snapshot(portfolio_name="persistent_value"):
     """Load portfolio data from CSV snapshot as fallback"""
     try:
         csv_path = f"cache_snapshots/{portfolio_name}_snapshot.csv"
@@ -131,8 +131,8 @@ with col1:
         st.write("")
 
 with col2:
-    st.title("🌱 Olivia Growth Portfolio")
-    st.markdown("Growth-focused investment strategy with high-momentum stocks")
+    st.title("📊 Persistent Value Portfolio")
+    st.markdown("Value-focused investment strategy with long-term growth potential")
 
 with col3:
     st.write("")  # Spacer
@@ -164,12 +164,12 @@ if 'force_refresh' not in st.session_state:
 # Initialize session state for portfolio data with default stocks
 if 'portfolio_data' not in st.session_state:
     st.session_state.portfolio_data = pd.DataFrame({
-        'Symbol': ['QGRW', 'GOOG', 'AMZN', 'MELI', 'SPOT', 'VEEV', 'AMD', 'MSFT', 'CRWD', 'FTNT', 
-                   'META', 'NVDA', 'GEV', 'PWR', 'SHOP', 'CDNS', 'ANET', 'NFLX', 'CRCL', 'AXON', 'PLTR'],
-        'Cost Basis': [50.50, 137.21, 145.09, 1545.00, 705.00, 186.46, 214.00, 369.07, 248.42, 58.48,
-                       589.00, 50.00, 660.00, 430.00, 74.18, 254.50, 57.62, 118.00, 84.01, 520.00, 39.00],
-        'Shares': [52098, 13082, 13427, 1486, 1740, 3286, 3870, 2164, 4380, 18172,
-                   2264, 12295, 1704, 2581, 14351, 3476, 15522, 17010, 15056, 2598, 4298]
+        'Symbol': ['SPMO', 'ASML', 'MNST', 'MSCI', 'COST', 'AVGO', 'MA', 'FICO', 'SPGI', 'IDXX', 
+                   'ISRG', 'V', 'CAT', 'ORLY', 'HEI', 'CPRT', 'WM', 'TSLA', 'AAPL', 'LRCX', 'TSM'],
+        'Cost Basis': [97.40, 660.32, 50.01, 342.94, 655.21, 138.00, 418.76, 1850.00, 427.93, 378.01,
+                       322.50, 276.65, 287.70, 103.00, 172.00, 52.00, 177.77, 270.00, 181.40, 73.24, 99.61],
+        'Shares': [14301, 1042, 8234, 2016, 798, 6088, 1389, 778, 1554, 1570,
+                   2769, 2338, 1356, 3566, 1804, 21136, 3082, 5022, 2865, 18667, 5850]
     })
 
 # Initialize edit mode state
@@ -311,7 +311,7 @@ def fetch_all_stocks_parallel(tickers, max_workers=10):
 # ============================================================================
 
 # SPY cache file
-SPY_CACHE_FILE = "olivia_spy_cache.json"
+SPY_CACHE_FILE = "spy_cache.json"
 
 def save_spy_to_cache(spy_data, timestamp):
     """Save SPY data to cache file"""
@@ -829,7 +829,7 @@ def get_fundamentals_from_motherduck(tickers, portfolio_df):
         
         # Execute query
         result = conn.execute(query).df()
-        # Note: Don't close connection - it's shared
+        # Note: Don't close connection - it's shared across all users
         
         if result.empty:
             st.warning("No data found in MotherDuck for portfolio stocks.")
@@ -961,11 +961,6 @@ def create_portfolio_radar_charts(tickers):
     Color intensity based on relative composite scores (heatmap style).
     """
     try:
-        # Get MotherDuck token
-        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
-        if not motherduck_token:
-            return None
-        
         # Filter out empty tickers and SPMO
         valid_tickers = [t.strip().upper() for t in tickers if t and t.strip() and t.strip().upper() != 'SPMO']
         if not valid_tickers:
@@ -973,7 +968,7 @@ def create_portfolio_radar_charts(tickers):
         
         symbols_str = "', '".join(valid_tickers)
         
-        # Connect to MotherDuck
+        # Get cached MotherDuck connection
         conn = get_motherduck_connection()
         
         # Get GuruFocus data for all symbols
@@ -1239,16 +1234,12 @@ def create_portfolio_trends_charts(tickers):
     Each stock gets 2 rows: candlestick chart on top, drawdown chart below.
     """
     try:
-        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
-        if not motherduck_token:
-            return None
-        
         # Filter valid tickers
         valid_tickers = [t.strip().upper() for t in tickers if t and t.strip() and t.strip().upper() != 'SPMO']
         if not valid_tickers:
             return None
         
-        # Connect to MotherDuck
+        # Get cached MotherDuck connection
         conn = get_motherduck_connection()
         
         # Fetch 8 years of data
@@ -1583,7 +1574,7 @@ def fetch_finnhub_news_curated(symbols, days_back=1, target_per_stock=3):
                     batch = recent_articles[i:i+10]
                     relevant = filter_articles_batch(symbol, batch)
                     filtered_articles.extend(relevant)
-                    time.sleep(2)
+                    # Removed time.sleep(2) - caching handles rate limiting
                 
                 for article in filtered_articles[:target_per_stock]:
                     summary = article['summary']
@@ -1606,7 +1597,7 @@ def fetch_finnhub_news_curated(symbols, days_back=1, target_per_stock=3):
                         'Article Link': article['url']
                     })
             
-            time.sleep(1)
+            # Removed time.sleep(1) - caching handles rate limiting
             
         except Exception as e:
             continue
@@ -1850,7 +1841,7 @@ def generate_portfolio_summary(news_df, portfolio_symbols):
                 'article_count': len(articles),
                 'summary': summary
             }
-            time.sleep(1)  # Rate limiting
+            # Removed time.sleep(1) - caching handles rate limiting
     
     return summaries
 
@@ -1897,9 +1888,6 @@ if 'last_refresh' in st.session_state:
 
 # Try to load from cache first
 cached_portfolio_data, cached_time = load_from_cache()
-
-# Initialize perf_df to avoid NameError
-perf_df = None
 
 # Main content area - Portfolio Performance Details
 if tickers and len(tickers) > 0:
@@ -1955,7 +1943,7 @@ if tickers and len(tickers) > 0:
                 # If fetch was successful, save to cache
                 if fetch_success and portfolio_data:
                     save_to_cache(portfolio_data, datetime.now())
-                    save_to_csv_snapshot(portfolio_data, "olivia_growth")  # Save CSV snapshot
+                    save_to_csv_snapshot(portfolio_data, "persistent_value")  # Save CSV snapshot
                     st.session_state.last_refresh = datetime.now()
                     st.success("✅ Fresh data loaded successfully!")
                 elif not fetch_success and cached_portfolio_data:
@@ -1964,7 +1952,7 @@ if tickers and len(tickers) > 0:
                     st.warning("⚠️ Rate limit reached. Loading from cache...")
                 elif not fetch_success:
                     # Try CSV snapshot as last resort
-                    csv_data, csv_time = load_from_csv_snapshot("olivia_growth")
+                    csv_data, csv_time = load_from_csv_snapshot("persistent_value")
                     if csv_data:
                         portfolio_data = csv_data
                         st.warning(f"💾 Loading from snapshot ({csv_time.strftime('%Y-%m-%d %I:%M %p')})")
@@ -1978,7 +1966,7 @@ if tickers and len(tickers) > 0:
                 st.info("📦 Loading from cache (click Refresh Data for latest prices)")
             else:
                 # Try CSV snapshot as fallback
-                csv_data, csv_time = load_from_csv_snapshot("olivia_growth")
+                csv_data, csv_time = load_from_csv_snapshot("persistent_value")
                 if csv_data:
                     portfolio_data = csv_data
                     st.info(f"💾 Loading from snapshot ({csv_time.strftime('%Y-%m-%d %I:%M %p')})")
@@ -2237,7 +2225,7 @@ else:
 # PORTFOLIO FUNDAMENTALS TABLE
 # ============================================================================
 
-if 'portfolio_data' in st.session_state and not st.session_state.portfolio_data.empty and tickers and perf_df is not None:
+if 'portfolio_data' in st.session_state and not st.session_state.portfolio_data.empty and tickers:
     st.markdown("---")
     st.subheader("📊 Portfolio Fundamentals")
     
@@ -2356,23 +2344,23 @@ try:
     
     # Check if it's Friday after 5 PM
     if now_est.weekday() == 4 and now_est.hour >= 17:  # Friday = 4
-        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
-        if motherduck_token and tickers:
-            conn = get_motherduck_connection()
-            last_refresh = get_last_refresh_time(conn)
-            
-            # Only auto-refresh if last refresh was before this Friday 5 PM
-            if last_refresh:
-                last_refresh_est = last_refresh.astimezone(est)
-                friday_5pm = now_est.replace(hour=17, minute=0, second=0, microsecond=0)
+        if tickers:
+            try:
+                conn = get_motherduck_connection()
+                last_refresh = get_last_refresh_time(conn)
                 
-                if last_refresh_est < friday_5pm:
-                    # Auto-refresh needed
-                    success, failed, total_rows = update_weekly_data(conn, tickers)
-                    if total_rows > 0:
-                        st.success(f"✅ Auto-refreshed {success} stocks ({total_rows} new weeks) - Friday 5 PM EST")
-            
-            # Note: Don't close connection - it's shared
+                # Only auto-refresh if last refresh was before this Friday 5 PM
+                if last_refresh:
+                    last_refresh_est = last_refresh.astimezone(est)
+                    friday_5pm = now_est.replace(hour=17, minute=0, second=0, microsecond=0)
+                    
+                    if last_refresh_est < friday_5pm:
+                        # Auto-refresh needed
+                        success, failed, total_rows = update_weekly_data(conn, tickers)
+                        if total_rows > 0:
+                            st.success(f"✅ Auto-refreshed {success} stocks ({total_rows} new weeks) - Friday 5 PM EST")
+            except:
+                pass
 except:
     pass
 
@@ -2383,16 +2371,13 @@ with col1:
     
     # Get last refresh time
     try:
-        motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
-        if motherduck_token:
-            conn = get_motherduck_connection()
-            last_refresh = get_last_refresh_time(conn)
-            # Note: Don't close connection - it's shared
-            
-            if last_refresh:
-                st.caption(f"🕒 Last data refresh: {last_refresh.strftime('%Y-%m-%d %I:%M %p EST')}")
-            else:
-                st.caption("⚠️ No data found - please run initial data population script")
+        conn = get_motherduck_connection()
+        last_refresh = get_last_refresh_time(conn)
+        
+        if last_refresh:
+            st.caption(f"🕒 Last data refresh: {last_refresh.strftime('%Y-%m-%d %I:%M %p EST')}")
+        else:
+            st.caption("⚠️ No data found - please run initial data population script")
     except:
         pass
 
@@ -2400,21 +2385,15 @@ with col2:
     if st.button("🔄 Refresh Data", use_container_width=True, key="refresh_trends_data"):
         with st.spinner("Updating weekly data..."):
             try:
-                motherduck_token = os.getenv('MOTHERDUCK_TOKEN')
-                if motherduck_token:
-                    conn = get_motherduck_connection()
-                    success, failed, total_rows = update_weekly_data(conn, tickers)
-                    # Note: Don't close connection - it's shared
-                    
-                    if total_rows > 0:
-                        st.success(f"✅ Updated {success} stocks ({total_rows} new weeks)")
-                    else:
-                        st.info("✅ Data is already up to date")
-                    
+                conn = get_motherduck_connection()
+                success, failed, total_rows = update_weekly_data(conn, tickers)
+                
+                if total_rows > 0:
+                    st.success(f"✅ Updated {success} stocks ({total_rows} new weeks)")
                     if failed > 0:
                         st.warning(f"⚠️ {failed} stocks failed to update")
                 else:
-                    st.error("MotherDuck token not configured")
+                    st.info("✅ Data is already up to date")
             except Exception as e:
                 st.error(f"Error updating data: {str(e)}")
 
