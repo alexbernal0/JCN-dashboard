@@ -56,7 +56,8 @@ SUMMARY_CACHE_FILE = "olivia_portfolio_summary_cache.json"
 try:
     FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
     GROK_API_KEY = os.getenv("GROK_API_KEY")
-    if not FINNHUB_API_KEY or not GROK_API_KEY:
+    # Only show warning if BOTH keys are missing (suppress if at least one is configured)
+    if not FINNHUB_API_KEY and not GROK_API_KEY:
         st.warning("⚠️ API keys not configured. Add FINNHUB_API_KEY and GROK_API_KEY to Railway environment variables for news features.")
 except Exception as e:
     FINNHUB_API_KEY = None
@@ -1951,26 +1952,26 @@ if tickers and len(tickers) > 0:
                             'Sector': stock_data['sector'],
                             'Industry': stock_data['industry']
                         })
-                
-                # If fetch was successful, save to cache
-                if fetch_success and portfolio_data:
-                    save_to_cache(portfolio_data, datetime.now())
-                    save_to_csv_snapshot(portfolio_data, "olivia_growth")  # Save CSV snapshot
-                    st.session_state.last_refresh = datetime.now()
-                    st.success("✅ Fresh data loaded successfully!")
-                elif not fetch_success and cached_portfolio_data:
-                    # Fall back to cached data
-                    portfolio_data = cached_portfolio_data
-                    st.warning("⚠️ Rate limit reached. Loading from cache...")
-                elif not fetch_success:
-                    # Try CSV snapshot as last resort
-                    csv_data, csv_time = load_from_csv_snapshot("olivia_growth")
-                    if csv_data:
-                        portfolio_data = csv_data
-                        st.warning(f"💾 Loading from snapshot ({csv_time.strftime('%Y-%m-%d %I:%M %p')})")
-                    else:
-                        st.error("❌ Could not fetch data and no cache available. Please try again later.")
-                        portfolio_data = []
+            
+            # Show success message ONCE after all stocks are processed
+            if fetch_success and portfolio_data:
+                save_to_cache(portfolio_data, datetime.now())
+                save_to_csv_snapshot(portfolio_data, "olivia_growth")  # Save CSV snapshot
+                st.session_state.last_refresh = datetime.now()
+                st.success("✅ Fresh data loaded successfully!")
+            elif not fetch_success and cached_portfolio_data:
+                # Fall back to cached data
+                portfolio_data = cached_portfolio_data
+                st.warning("⚠️ Rate limit reached. Loading from cache...")
+            elif not fetch_success:
+                # Try CSV snapshot as last resort
+                csv_data, csv_time = load_from_csv_snapshot("olivia_growth")
+                if csv_data:
+                    portfolio_data = csv_data
+                    st.warning(f"💾 Loading from snapshot ({csv_time.strftime('%Y-%m-%d %I:%M %p')})")
+                else:
+                    st.error("❌ Could not fetch data and no cache available. Please try again later.")
+                    portfolio_data = []
         else:
             # Load from cache
             if cached_portfolio_data:
