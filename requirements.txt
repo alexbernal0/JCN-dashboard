@@ -10,3 +10,4 @@ duckdb>=0.9.0
 streamlit-aggrid>=1.2.0
 scipy>=1.11.0
 pytz>=2023.3
+Pillow>=10.0.0
