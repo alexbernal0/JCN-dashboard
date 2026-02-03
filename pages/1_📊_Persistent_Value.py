@@ -1959,7 +1959,7 @@ if tickers and len(tickers) > 0:
                     st.warning(f"💾 Loading from snapshot ({csv_time.strftime('%Y-%m-%d %I:%M %p')})")
                 else:
                     st.error("❌ Could not fetch data and no cache available. Please try again later.")
-                        portfolio_data = []
+                    portfolio_data = []
         else:
             # Load from cache
             if cached_portfolio_data:
