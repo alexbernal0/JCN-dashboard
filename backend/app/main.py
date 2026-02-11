@@ -5,7 +5,7 @@ Main application entry point
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.v1 import portfolios, stocks
+from app.api.v1 import portfolios, stocks, mock
 from app.core.config import settings
 
 # Create FastAPI app
@@ -30,6 +30,7 @@ app.add_middleware(
 # Include routers
 app.include_router(portfolios.router, prefix="/api/v1/portfolios", tags=["portfolios"])
 app.include_router(stocks.router, prefix="/api/v1/stocks", tags=["stocks"])
+app.include_router(mock.router, prefix="/api/v1/mock", tags=["mock"])
 
 @app.get("/")
 async def root():

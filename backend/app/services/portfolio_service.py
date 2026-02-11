@@ -20,12 +20,12 @@ class PortfolioService:
     
     def __init__(self):
         self.portfolios = {
-            "persistent-value": {
+            "persistent_value": {
                 "name": "Persistent Value Portfolio",
                 "description": "Value-focused investment strategy with long-term growth potential",
                 "stocks": settings.PERSISTENT_VALUE_STOCKS
             },
-            "olivia-growth": {
+            "olivia_growth": {
                 "name": "Olivia Growth Portfolio",
                 "description": "Growth-focused technology and innovation stocks",
                 "stocks": settings.OLIVIA_GROWTH_STOCKS
