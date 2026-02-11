@@ -35,6 +35,13 @@
   
   body {
     @apply bg-background text-primary font-sans antialiased;
+    margin: 0;
+    padding: 0;
+  }
+  
+  html {
+    margin: 0;
+    padding: 0;
   }
 }
 

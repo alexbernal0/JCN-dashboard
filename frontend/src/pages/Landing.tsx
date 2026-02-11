@@ -1,12 +1,23 @@
 import { useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 
 export default function Landing() {
   const navigate = useNavigate();
 
+  // Prevent scrolling on landing page
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    };
+  }, []);
+
   return (
     <div
       onClick={() => navigate('/dashboard')}
-      className="fixed inset-0 w-full h-full overflow-hidden cursor-pointer"
+      className="fixed inset-0 w-screen h-screen overflow-hidden cursor-pointer"
       style={{
         backgroundImage: 'url(/landing-bg.jpg)',
         backgroundSize: 'cover',
