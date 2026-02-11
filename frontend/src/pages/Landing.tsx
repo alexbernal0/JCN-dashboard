@@ -7,13 +7,9 @@ export default function Landing() {
 
   return (
     <div
-      className="fixed inset-0 w-full h-full overflow-hidden"
+      className="fixed inset-0 w-full h-full overflow-hidden bg-cover bg-center bg-no-repeat"
       style={{
         backgroundImage: 'url(/landing-bg.jpg)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        fontFamily: "'Inter', sans-serif"
       }}
     >
       {/* Clickable overlay */}
@@ -25,9 +21,11 @@ export default function Landing() {
         <h1 
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
-          className="text-6xl font-light tracking-[0.3em] transition-all duration-300 select-none"
+          className={`
+            text-6xl font-light tracking-[0.3em] transition-all duration-300 select-none
+            ${isHovered ? 'text-accent' : 'text-gray-800'}
+          `}
           style={{
-            color: isHovered ? '#3b82f6' : '#1f2937',
             textShadow: isHovered ? '0 0 20px rgba(59, 130, 246, 0.5)' : 'none'
           }}
         >
