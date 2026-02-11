@@ -8,7 +8,7 @@ export default function Landing() {
       onClick={() => navigate('/dashboard')}
       className="fixed inset-0 w-full h-full overflow-hidden cursor-pointer"
       style={{
-        backgroundImage: 'url(/shutterstock_61843960.jpg)',
+        backgroundImage: 'url(/landing-bg.jpg)',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
