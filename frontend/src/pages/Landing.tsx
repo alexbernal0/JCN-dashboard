@@ -1,33 +1,44 @@
 import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 
 export default function Landing() {
   const navigate = useNavigate();
+  const [isHovered, setIsHovered] = useState(false);
 
   return (
     <div
-      onClick={() => navigate('/dashboard')}
-      className="relative w-screen h-screen cursor-pointer overflow-hidden"
+      className="fixed inset-0 w-full h-full overflow-hidden"
       style={{
         backgroundImage: 'url(/landing-bg.jpg)',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat'
+        backgroundRepeat: 'no-repeat',
+        fontFamily: "'Inter', sans-serif"
       }}
     >
-      {/* JCN.AI Text in center */}
-      <div className="absolute inset-0 flex items-center justify-center">
+      {/* Clickable overlay */}
+      <div 
+        onClick={() => navigate('/dashboard')}
+        className="absolute inset-0 flex items-center justify-center cursor-pointer"
+      >
+        {/* JCN.AI Text */}
         <h1 
-          className="text-4xl font-light tracking-[0.3em] text-gray-600/80 hover:text-gray-800/90 transition-colors duration-300"
-          style={{ fontFamily: 'Inter, sans-serif' }}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+          className="text-6xl font-light tracking-[0.3em] transition-all duration-300 select-none"
+          style={{
+            color: isHovered ? '#3b82f6' : '#1f2937',
+            textShadow: isHovered ? '0 0 20px rgba(59, 130, 246, 0.5)' : 'none'
+          }}
         >
           JCN.AI
         </h1>
       </div>
 
       {/* Subtle hint text at bottom */}
-      <div className="absolute bottom-8 left-0 right-0 text-center">
-        <p className="text-sm text-gray-400/60 font-light tracking-wider">
-          Click anywhere to enter
+      <div className="absolute bottom-8 left-0 right-0 text-center pointer-events-none">
+        <p className="text-sm text-gray-500/60 font-light tracking-wider">
+          Click to enter
         </p>
       </div>
     </div>
