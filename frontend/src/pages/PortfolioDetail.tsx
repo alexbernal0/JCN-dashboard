@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { PortfolioPerformanceChart } from '../components/charts/PortfolioPerformanceChart';
 import { SectorAllocationChart } from '../components/charts/SectorAllocationChart';
 import { PortfolioRadarChart } from '../components/charts/PortfolioRadarChart';
-import { StockTable, Stock } from '../components/tables/StockTable';
+import { StockTable, type Stock } from '../components/tables/StockTable';
 import { MetricsTable } from '../components/tables/MetricsTable';
 import { Loading } from '../components/layout/Loading';
 import { ErrorMessage } from '../components/layout/ErrorMessage';
