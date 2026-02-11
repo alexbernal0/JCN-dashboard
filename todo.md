@@ -4,22 +4,22 @@
 - [x] Implement Happy Hues Palette #6 for light mode
 - [x] Update Tailwind config with light/dark color tokens
 - [x] Create ThemeProvider context for theme switching
-- [ ] Add theme toggle button in sidebar
+- [x] Add theme toggle button in sidebar
 - [x] Test theme persistence in localStorage
 
 ## Phase 2: Layout & Navigation
-- [ ] Build sidebar navigation component
-- [ ] Add all 7 pages to sidebar menu
-- [ ] Create layout wrapper with sidebar
-- [ ] Fix routing in App.tsx
-- [ ] Add active state highlighting in sidebar
+- [x] Build sidebar navigation component
+- [x] Add all 7 pages to sidebar menu
+- [x] Create layout wrapper with sidebar
+- [x] Fix routing in App.tsx
+- [x] Add active state highlighting in sidebar
 
 ## Phase 3: Dashboard Home Page
-- [ ] Match original Streamlit home page layout
-- [ ] Add portfolio overview cards
-- [ ] Add quick links to portfolios
-- [ ] Add tools section (Stock Analysis, Risk Management)
-- [ ] Add quick stats section
+- [x] Match original Streamlit home page layout
+- [x] Add portfolio overview cards
+- [x] Add quick links to portfolios
+- [x] Add tools section (Stock Analysis, Risk Management)
+- [x] Add quick stats section
 
 ## Phase 4: Portfolio Pages
 - [ ] Persistent Value Portfolio page
