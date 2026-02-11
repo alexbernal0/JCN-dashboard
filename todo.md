@@ -1,11 +1,11 @@
 # JCN Dashboard TODO
 
 ## Phase 1: Theme System
-- [ ] Implement Happy Hues Palette #6 for light mode
-- [ ] Update Tailwind config with light/dark color tokens
-- [ ] Create ThemeProvider context for theme switching
+- [x] Implement Happy Hues Palette #6 for light mode
+- [x] Update Tailwind config with light/dark color tokens
+- [x] Create ThemeProvider context for theme switching
 - [ ] Add theme toggle button in sidebar
-- [ ] Test theme persistence in localStorage
+- [x] Test theme persistence in localStorage
 
 ## Phase 2: Layout & Navigation
 - [ ] Build sidebar navigation component
