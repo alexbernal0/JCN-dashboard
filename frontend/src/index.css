@@ -3,6 +3,32 @@
 @tailwind utilities;
 
 @layer base {
+  /* Light mode (Happy Hues Palette #6) */
+  :root {
+    --color-background: #fffffe;
+    --color-surface: #d1d1e9;
+    --color-border: #2b2c34;
+    --color-primary: #2b2c34;
+    --color-secondary: #6c6c7c;
+    --color-accent: #6246ea;
+    --color-success: #22c55e;
+    --color-error: #e45858;
+    --color-highlight: #e45858;
+  }
+
+  /* Dark mode */
+  .dark {
+    --color-background: #0a0a0a;
+    --color-surface: #141414;
+    --color-border: #262626;
+    --color-primary: #ffffff;
+    --color-secondary: #a3a3a3;
+    --color-accent: #3b82f6;
+    --color-success: #22c55e;
+    --color-error: #ef4444;
+    --color-highlight: #3b82f6;
+  }
+
   * {
     @apply border-border;
   }

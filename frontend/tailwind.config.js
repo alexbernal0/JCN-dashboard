@@ -8,15 +8,16 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: '#0a0a0a',
-        surface: '#141414',
-        border: '#262626',
-        primary: '#ffffff',
-        secondary: '#a3a3a3',
-        accent: '#3b82f6',
-        success: '#22c55e',
-        warning: '#f59e0b',
-        danger: '#ef4444',
+        // Semantic color tokens that change based on theme
+        background: 'var(--color-background)',
+        surface: 'var(--color-surface)',
+        border: 'var(--color-border)',
+        primary: 'var(--color-primary)',
+        secondary: 'var(--color-secondary)',
+        accent: 'var(--color-accent)',
+        success: 'var(--color-success)',
+        error: 'var(--color-error)',
+        highlight: 'var(--color-highlight)',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
