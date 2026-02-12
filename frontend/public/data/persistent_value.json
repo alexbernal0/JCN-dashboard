@@ -1,0 +1,79 @@
+{
+  "portfolio_id": "persistent_value",
+  "name": "Persistent Value Portfolio",
+  "description": "Value-focused investment strategy with long-term growth potential",
+  "last_updated": "2026-02-11T19:00:00Z",
+  "holdings": [
+    {
+      "symbol": "AAPL",
+      "company_name": "Apple Inc.",
+      "shares": 100,
+      "cost_basis": 150.00,
+      "current_price": 180.50,
+      "position_value": 18050.00,
+      "total_cost": 15000.00,
+      "gain_loss": 3050.00,
+      "gain_loss_percent": 20.33,
+      "weight": 45.0,
+      "day_change": 2.50,
+      "day_change_percent": 1.40
+    },
+    {
+      "symbol": "MSFT",
+      "company_name": "Microsoft Corporation",
+      "shares": 50,
+      "cost_basis": 300.00,
+      "current_price": 380.00,
+      "position_value": 19000.00,
+      "total_cost": 15000.00,
+      "gain_loss": 4000.00,
+      "gain_loss_percent": 26.67,
+      "weight": 47.5,
+      "day_change": 5.00,
+      "day_change_percent": 1.33
+    },
+    {
+      "symbol": "GOOGL",
+      "company_name": "Alphabet Inc.",
+      "shares": 20,
+      "cost_basis": 140.00,
+      "current_price": 150.00,
+      "position_value": 3000.00,
+      "total_cost": 2800.00,
+      "gain_loss": 200.00,
+      "gain_loss_percent": 7.14,
+      "weight": 7.5,
+      "day_change": 1.00,
+      "day_change_percent": 0.67
+    }
+  ],
+  "performance": {
+    "dates": ["2026-01-01", "2026-01-15", "2026-02-01", "2026-02-11"],
+    "portfolio_values": [35000, 37000, 39000, 40050],
+    "sp500_values": [35000, 36500, 38000, 39500]
+  },
+  "allocation": {
+    "by_stock": {
+      "AAPL": 45.0,
+      "MSFT": 47.5,
+      "GOOGL": 7.5
+    },
+    "by_sector": {
+      "Technology": 100.0
+    },
+    "by_industry": {
+      "Software": 47.5,
+      "Hardware": 52.5
+    }
+  },
+  "metrics": {
+    "total_value": 40050.00,
+    "total_cost": 32800.00,
+    "total_gain_loss": 7250.00,
+    "total_gain_loss_percent": 22.10,
+    "cash": 5000.00,
+    "num_holdings": 3,
+    "day_change": 550.00,
+    "day_change_percent": 1.39
+  }
+}

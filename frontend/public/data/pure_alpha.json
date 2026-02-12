@@ -1,0 +1,80 @@
+{
+  "portfolio_id": "pure_alpha",
+  "name": "Pure Alpha Portfolio",
+  "description": "Alpha-generating investment strategy",
+  "last_updated": "2026-02-11T19:00:00Z",
+  "holdings": [
+    {
+      "symbol": "SPY",
+      "company_name": "SPDR S&P 500 ETF Trust",
+      "shares": 200,
+      "cost_basis": 450.00,
+      "current_price": 520.00,
+      "position_value": 104000.00,
+      "total_cost": 90000.00,
+      "gain_loss": 14000.00,
+      "gain_loss_percent": 15.56,
+      "weight": 52.0,
+      "day_change": 3.50,
+      "day_change_percent": 0.68
+    },
+    {
+      "symbol": "QQQ",
+      "company_name": "Invesco QQQ Trust",
+      "shares": 150,
+      "cost_basis": 380.00,
+      "current_price": 425.00,
+      "position_value": 63750.00,
+      "total_cost": 57000.00,
+      "gain_loss": 6750.00,
+      "gain_loss_percent": 11.84,
+      "weight": 32.0,
+      "day_change": 4.00,
+      "day_change_percent": 0.95
+    },
+    {
+      "symbol": "IWM",
+      "company_name": "iShares Russell 2000 ETF",
+      "shares": 150,
+      "cost_basis": 210.00,
+      "current_price": 225.00,
+      "position_value": 33750.00,
+      "total_cost": 31500.00,
+      "gain_loss": 2250.00,
+      "gain_loss_percent": 7.14,
+      "weight": 16.0,
+      "day_change": 1.50,
+      "day_change_percent": 0.67
+    }
+  ],
+  "performance": {
+    "dates": ["2026-01-01", "2026-01-15", "2026-02-01", "2026-02-11"],
+    "portfolio_values": [170000, 180000, 195000, 201500],
+    "sp500_values": [170000, 177000, 188000, 195000]
+  },
+  "allocation": {
+    "by_stock": {
+      "SPY": 52.0,
+      "QQQ": 32.0,
+      "IWM": 16.0
+    },
+    "by_sector": {
+      "ETF": 100.0
+    },
+    "by_industry": {
+      "Large Cap": 52.0,
+      "Tech": 32.0,
+      "Small Cap": 16.0
+    }
+  },
+  "metrics": {
+    "total_value": 201500.00,
+    "total_cost": 178500.00,
+    "total_gain_loss": 23000.00,
+    "total_gain_loss_percent": 12.89,
+    "cash": 15000.00,
+    "num_holdings": 3,
+    "day_change": 1350.00,
+    "day_change_percent": 0.67
+  }
+}

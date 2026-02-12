@@ -1,10 +1,19 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Moon, Sun, LayoutDashboard, TrendingUp, Sprout, Zap, BarChart3, Globe, Shield, Info } from 'lucide-react';
+import { Moon, Sun, LayoutDashboard, TrendingUp, Sprout, Zap, BarChart3, Globe, Shield, Info, RefreshCw } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useQueryClient } from '@tanstack/react-query';
 
 export function Sidebar() {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
+  const queryClient = useQueryClient();
+
+  const handleRefreshData = () => {
+    // Invalidate all portfolio queries to force refetch
+    queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+    // Show a brief toast notification (optional)
+    console.log('Refreshing all portfolio data...');
+  };
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -123,6 +132,15 @@ export function Sidebar() {
               <span>{label}</span>
             </Link>
           ))}
+          
+          {/* Refresh Data Button */}
+          <button
+            onClick={handleRefreshData}
+            className="w-full flex items-center gap-3 px-6 py-3 text-sm font-medium transition-all text-secondary hover:text-primary hover:bg-surface/50"
+          >
+            <RefreshCw className="w-5 h-5" />
+            <span>Refresh Data</span>
+          </button>
         </div>
       </nav>
 

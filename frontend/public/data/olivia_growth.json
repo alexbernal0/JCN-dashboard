@@ -1,0 +1,81 @@
+{
+  "portfolio_id": "olivia_growth",
+  "name": "Olivia Growth Portfolio",
+  "description": "Growth-focused technology and innovation stocks",
+  "last_updated": "2026-02-11T19:00:00Z",
+  "holdings": [
+    {
+      "symbol": "NVDA",
+      "company_name": "NVIDIA Corporation",
+      "shares": 75,
+      "cost_basis": 450.00,
+      "current_price": 620.00,
+      "position_value": 46500.00,
+      "total_cost": 33750.00,
+      "gain_loss": 12750.00,
+      "gain_loss_percent": 37.78,
+      "weight": 55.0,
+      "day_change": 8.50,
+      "day_change_percent": 1.39
+    },
+    {
+      "symbol": "TSLA",
+      "company_name": "Tesla Inc.",
+      "shares": 100,
+      "cost_basis": 250.00,
+      "current_price": 280.00,
+      "position_value": 28000.00,
+      "total_cost": 25000.00,
+      "gain_loss": 3000.00,
+      "gain_loss_percent": 12.00,
+      "weight": 33.0,
+      "day_change": 3.50,
+      "day_change_percent": 1.27
+    },
+    {
+      "symbol": "AMZN",
+      "company_name": "Amazon.com Inc.",
+      "shares": 50,
+      "cost_basis": 180.00,
+      "current_price": 205.00,
+      "position_value": 10250.00,
+      "total_cost": 9000.00,
+      "gain_loss": 1250.00,
+      "gain_loss_percent": 13.89,
+      "weight": 12.0,
+      "day_change": 2.00,
+      "day_change_percent": 0.99
+    }
+  ],
+  "performance": {
+    "dates": ["2026-01-01", "2026-01-15", "2026-02-01", "2026-02-11"],
+    "portfolio_values": [60000, 70000, 80000, 84750],
+    "sp500_values": [60000, 63000, 66000, 68500]
+  },
+  "allocation": {
+    "by_stock": {
+      "NVDA": 55.0,
+      "TSLA": 33.0,
+      "AMZN": 12.0
+    },
+    "by_sector": {
+      "Technology": 67.0,
+      "Consumer Cyclical": 33.0
+    },
+    "by_industry": {
+      "Semiconductors": 55.0,
+      "Auto Manufacturers": 33.0,
+      "Internet Retail": 12.0
+    }
+  },
+  "metrics": {
+    "total_value": 84750.00,
+    "total_cost": 67750.00,
+    "total_gain_loss": 17000.00,
+    "total_gain_loss_percent": 25.09,
+    "cash": 10000.00,
+    "num_holdings": 3,
+    "day_change": 1050.00,
+    "day_change_percent": 1.25
+  }
+}
