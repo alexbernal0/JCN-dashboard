@@ -26,9 +26,9 @@ export default function Landing() {
       }}
     >
       {/* JCN.AI text positioned in the center white space */}
-      <div className="absolute inset-0 flex items-center justify-center" style={{ marginTop: '-15vh' }}>
+      <div className="absolute inset-0 flex items-center justify-center" style={{ marginTop: '-27vh' }}>
         <h1
-          className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-wider transition-all duration-300 hover:text-[#00d4ff] hover:drop-shadow-[0_0_30px_rgba(0,212,255,0.8)]"
+          className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-wider transition-all duration-500 ease-in-out hover:scale-110 hover:text-[#00f0ff] hover:drop-shadow-[0_0_40px_rgba(0,240,255,0.9)]"
           style={{
             color: '#1a1a1a',
             fontFamily: 'Inter, sans-serif',
