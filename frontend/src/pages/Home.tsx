@@ -1,7 +1,15 @@
 import { Link } from 'react-router-dom';
+import { useEffect } from 'react';
 import { TrendingUp, Sprout, Zap, BarChart3, Globe, Shield } from 'lucide-react';
+import { usePrefetchPortfolios } from '../hooks/usePortfolio';
 
 export function Home() {
+  const { prefetchAll } = usePrefetchPortfolios();
+
+  // Prefetch all portfolio data when dashboard loads
+  useEffect(() => {
+    prefetchAll();
+  }, [prefetchAll]);
   return (
     <div>
       {/* Header */}

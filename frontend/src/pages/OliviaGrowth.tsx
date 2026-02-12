@@ -48,32 +48,14 @@ interface PortfolioData {
 }
 
 export function OliviaGrowth() {
-  const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: portfolio, isLoading, isError, error, refetch } = usePortfolio('olivia_growth');
 
-  const fetchPortfolio = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch('https://jcn-dashboard-production.up.railway.app/api/v1/portfolios/olivia_growth');
-      if (!response.ok) {
-        throw new Error('Failed to fetch portfolio data');
-      }
-      const data = await response.json();
-      setPortfolio(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
     fetchPortfolio();
   }, []);
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -84,12 +66,12 @@ export function OliviaGrowth() {
     );
   }
 
-  if (error) {
+  if (isError) {
     return (
       <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-6">
         <p className="text-red-500">Error: {error}</p>
         <button 
-          onClick={fetchPortfolio}
+          onClick={() => refetch()}
           className="mt-4 px-4 py-2 bg-accent text-white rounded hover:bg-accent/80"
         >
           Retry
@@ -209,7 +191,7 @@ export function OliviaGrowth() {
           <p className="text-secondary">{portfolio.description}</p>
         </div>
         <button
-          onClick={fetchPortfolio}
+          onClick={() => refetch()}
           className="flex items-center gap-2 px-4 py-2 bg-surface border border-border rounded hover:border-accent transition-colors"
         >
           <RefreshCw className="w-4 h-4" />
