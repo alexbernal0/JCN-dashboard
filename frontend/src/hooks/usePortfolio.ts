@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
 
 const API_BASE_URL = 'https://jcn-dashboard-production.up.railway.app/api/v1';
 
@@ -17,6 +18,7 @@ export interface StockHolding {
   day_change_percent?: number;
   sector?: string;
   industry?: string;
+  fundamentals?: any;
 }
 
 export interface PortfolioData {
@@ -47,7 +49,15 @@ export interface PortfolioData {
   };
 }
 
-const fetchPortfolio = async (portfolioId: string): Promise<PortfolioData> => {
+const loadStaticSnapshot = async (portfolioId: string): Promise<PortfolioData> => {
+  const response = await fetch(`/data/${portfolioId}.json`);
+  if (!response.ok) {
+    throw new Error(`Failed to load static snapshot for ${portfolioId}`);
+  }
+  return response.json();
+};
+
+const fetchPortfolioFromAPI = async (portfolioId: string): Promise<PortfolioData> => {
   const response = await fetch(`${API_BASE_URL}/portfolios/${portfolioId}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch portfolio: ${response.statusText}`);
@@ -56,17 +66,44 @@ const fetchPortfolio = async (portfolioId: string): Promise<PortfolioData> => {
 };
 
 export function usePortfolio(portfolioId: string) {
-  return useQuery({
+  const [staticData, setStaticData] = useState<PortfolioData | null>(null);
+  const [isLoadingStatic, setIsLoadingStatic] = useState(true);
+
+  useEffect(() => {
+    loadStaticSnapshot(portfolioId)
+      .then((data) => {
+        setStaticData(data);
+        setIsLoadingStatic(false);
+      })
+      .catch((error) => {
+        console.error('Failed to load static snapshot:', error);
+        setIsLoadingStatic(false);
+      });
+  }, [portfolioId]);
+
+  const { data: apiData, isLoading: isLoadingAPI, isError, error, refetch } = useQuery({
     queryKey: ['portfolio', portfolioId],
-    queryFn: () => fetchPortfolio(portfolioId),
-    staleTime: 1000 * 60 * 10, // Data stays fresh for 10 minutes
-    cacheTime: 1000 * 60 * 30, // Keep in cache for 30 minutes
+    queryFn: () => fetchPortfolioFromAPI(portfolioId),
+    staleTime: 1000 * 60 * 10,
+    cacheTime: 1000 * 60 * 30,
     refetchOnWindowFocus: false,
     retry: 2,
+    enabled: !isLoadingStatic,
   });
+
+  const data = apiData || staticData;
+  const isLoading = isLoadingStatic && !staticData && isLoadingAPI && !apiData;
+
+  return {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isUsingSnapshot: !apiData && !!staticData,
+  };
 }
 
-// Hook to prefetch all portfolios
 export function usePrefetchPortfolios() {
   const queryClient = useQueryClient();
 
@@ -75,7 +112,7 @@ export function usePrefetchPortfolios() {
     portfolios.forEach((portfolioId) => {
       queryClient.prefetchQuery({
         queryKey: ['portfolio', portfolioId],
-        queryFn: () => fetchPortfolio(portfolioId),
+        queryFn: () => fetchPortfolioFromAPI(portfolioId),
         staleTime: 1000 * 60 * 10,
       });
     });
