@@ -15,13 +15,37 @@ class YFinanceClient:
         """Get current stock information"""
         try:
             ticker = yf.Ticker(symbol)
-            info = ticker.info
+            
+            # Use fast_info for current price (more reliable)
+            try:
+                current_price = ticker.fast_info.last_price
+            except:
+                # Fallback to history if fast_info fails
+                hist = ticker.history(period="1d")
+                current_price = hist['Close'].iloc[-1] if not hist.empty else 0
+            
+            # Get previous close for change calculation
+            try:
+                hist = ticker.history(period="5d")
+                if len(hist) >= 2:
+                    prev_close = hist['Close'].iloc[-2]
+                    change_percent = ((current_price - prev_close) / prev_close * 100) if prev_close > 0 else 0
+                else:
+                    change_percent = 0
+            except:
+                change_percent = 0
+            
+            # Get info dict for other data (less reliable but needed for fundamentals)
+            try:
+                info = ticker.info
+            except:
+                info = {}
             
             return {
                 "symbol": symbol,
                 "name": info.get("longName", symbol),
-                "current_price": info.get("currentPrice", 0),
-                "change_percent": info.get("regularMarketChangePercent", 0),
+                "current_price": float(current_price) if current_price else 0,
+                "change_percent": float(change_percent) if change_percent else 0,
                 "market_cap": info.get("marketCap"),
                 "pe_ratio": info.get("trailingPE"),
                 "dividend_yield": info.get("dividendYield"),
