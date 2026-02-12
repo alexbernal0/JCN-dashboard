@@ -38,7 +38,7 @@ class PortfolioService:
             }
         }
     
-    @cached(ttl=300, key_prefix="portfolio")
+    @cached(ttl=600, key_prefix="portfolio", persist=True)  # 10min cache with disk persistence
     async def get_portfolio_summary(self, portfolio_id: str) -> PortfolioSummary:
         """Get complete portfolio summary with real holdings and MotherDuck data"""
         if portfolio_id not in self.portfolios:

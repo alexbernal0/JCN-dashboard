@@ -21,15 +21,17 @@ Professional investment dashboard providing real-time portfolio tracking, analys
 - Historical performance tracking
 
 ### Data Integration
-- **MotherDuck**: Fundamental analysis and quality metrics
-- **yfinance**: Real-time market data and historical prices
+- **MotherDuck**: Fundamental analysis and quality metrics (24h cache)
+- **yfinance**: Real-time market data and historical prices (5min cache)
 - **DuckDB**: High-performance data queries
-- Automatic data caching for optimal performance
+- **Multi-layer caching**: Static JSON + In-memory + Disk persistence (100% free, no Redis)
+- Instant page loads with stale-while-revalidate strategy
 
 ### User Experience
 - Dark/Light mode toggle with Happy Hues color palette
 - Responsive design for all screen sizes
-- Fast loading with optimized data fetching
+- **Instant loading** (0ms with static JSON fallback)
+- **Refresh Data button** for manual cache invalidation
 - Clean, modern UI with Inter font
 - Interactive ECharts visualizations
 
@@ -49,7 +51,10 @@ Professional investment dashboard providing real-time portfolio tracking, analys
 - **Data Sources**:
   - MotherDuck (fundamental data)
   - yfinance (market data)
-- **Caching**: In-memory caching (5-minute TTL)
+- **Caching**: Multi-layer system (see [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md))
+  - In-memory cache with TTL
+  - Disk persistence (survives restarts)
+  - Static JSON fallback
 - **Deployment**: Railway
 
 ### Database
@@ -67,20 +72,26 @@ jcn-build/
 │   ├── src/
 │   │   ├── components/      # Reusable UI components
 │   │   ├── contexts/        # React contexts
+│   │   ├── hooks/           # Custom hooks (usePortfolio)
 │   │   ├── pages/           # Page components
 │   │   ├── App.tsx          # Main app with routing
 │   │   └── index.css        # Global styles
-│   ├── public/              # Static assets
+│   ├── public/
+│   │   └── data/            # Static JSON snapshots
 │   └── package.json
 │
 ├── backend/                  # FastAPI backend
 │   ├── app/
 │   │   ├── api/v1/          # API endpoints
+│   │   ├── core/            # Cache system
 │   │   ├── models/          # Data models
 │   │   ├── services/        # Business logic
-│   │   ├── utils/           # Utilities
+│   │   ├── utils/           # Utilities (yfinance, MotherDuck)
 │   │   └── data/            # Portfolio holdings
 │   └── requirements.txt
+│
+├── CACHING_ARCHITECTURE.md  # Detailed caching documentation
+└── tailwind_knowledge.md    # Tailwind CSS reference
 │
 └── pages/                    # Original Streamlit app (reference)
 ```

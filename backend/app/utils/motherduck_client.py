@@ -6,6 +6,7 @@ import duckdb
 import os
 from typing import Optional
 import pandas as pd
+from app.core.cache import cache
 
 class MotherDuckClient:
     """Client for connecting to MotherDuck database"""
@@ -31,6 +32,7 @@ class MotherDuckClient:
     def get_fundamentals(self, tickers: list) -> Optional[pd.DataFrame]:
         """
         Fetch fundamental metrics from MotherDuck for given tickers.
+        Cached for 24 hours since fundamentals update daily.
         
         Args:
             tickers: List of stock ticker symbols
@@ -45,6 +47,13 @@ class MotherDuckClient:
         valid_tickers = [t.strip().upper() for t in tickers if t and t.strip()]
         if not valid_tickers:
             return None
+        
+        # Check cache first (24 hour TTL)
+        cache_key = f"motherduck:fundamentals:{','.join(sorted(valid_tickers))}"
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            print(f"MotherDuck cache HIT for {len(valid_tickers)} tickers")
+            return cached_result
         
         symbols_str = "', '".join(valid_tickers)
         
@@ -97,10 +106,14 @@ class MotherDuckClient:
         ORDER BY gf.Symbol
         """
         
+        print(f"MotherDuck cache MISS - querying database for {len(valid_tickers)} tickers")
         result = self.execute_query(query)
         
         if result.empty:
             return None
+        
+        # Cache for 24 hours (86400 seconds) with disk persistence
+        cache.set(cache_key, result, ttl=86400, persist=True)
         
         return result
     
