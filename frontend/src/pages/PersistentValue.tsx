@@ -246,6 +246,12 @@ export function PersistentValue() {
           </table>
         </div>
       </div>
+
+      {/* Test: Simple div to verify builds work */}
+      <div className="mt-8 bg-surface rounded-lg p-6 border border-border">
+        <h2 className="text-xl font-semibold">Portfolio Input (Coming Soon)</h2>
+        <p className="text-secondary mt-2">This section will allow you to edit your portfolio holdings.</p>
+      </div>
     </div>
   );
 }

@@ -122,3 +122,14 @@
 
 **Current Status:** All core features implemented ✅  
 **Next Priority:** Testing & final deployment verification
+
+
+## Phase 10: Portfolio Input Component (IN PROGRESS) 🔧
+- [ ] Debug why PortfolioInput component caused "Failed to fetch" error
+- [ ] Check if lucide-react icons are causing the issue
+- [ ] Test minimal component addition first
+- [ ] Create working Portfolio Input table at bottom of Persistent Value page
+- [ ] Add Lock/Edit toggle functionality
+- [ ] Add Add/Remove row buttons
+- [ ] Add Save button (console log for now)
+- [ ] Verify page works after deployment
